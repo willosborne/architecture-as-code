@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@stoplight/spectral-ref-resolver": "^1.0.4"
+  }
+}

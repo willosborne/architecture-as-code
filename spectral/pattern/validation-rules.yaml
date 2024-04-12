@@ -44,17 +44,34 @@ rules:
       functionOptions:
         notMatch: "^{{\\s*[A-Z_]+\\s*}}$"
 
+  # relationship-references-existing-nodes:
+  #   description: Relationships with const properties must reference existing nodes.
+  #   severity: error 
+  #   message: "{{error}}"
+  #   given: "$.properties.relationships.prefixItems[*].properties.relationship-type.const.*"
+  #   then:
+  #     # only container and actor are in scope, since source/destination use interfaces now
+  #     - field: actor
+  #       function: node-id-exists
+  #     - field: container 
+  #       function: node-id-exists
+  
   relationship-references-existing-nodes:
     description: Relationships with const properties must reference existing nodes.
     severity: error 
-    message: "{{error}}"
-    given: "$.properties.relationships.prefixItems[*].properties.relationship-type.*"
+    message: "asdfsaf"
+    # given: "$.properties.relationships.prefixItems[*].properties.relationship-type.const.connects.source.node"
+    # given: "$.properties.relationships.type"
+    given: "$.properties.relationships.prefixItems[*].properties.relationship-type"
     then:
       # only container and actor are in scope, since source/destination use interfaces now
-      - field: actor
-        function: node-id-exists
-      - field: container 
-        function: node-id-exists
+      function: node-id-exists
+        # field: node
+      # - field: actor
+      #   function: node-id-exists
+      # - field: container 
+      #   function: node-id-exists
+
 
   # connects-relationship-references-existing-nodes:
   #   description: Connects relationships must reference existing nodes.
