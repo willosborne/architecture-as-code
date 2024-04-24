@@ -10,3 +10,7 @@ import _ from 'lodash';
 export function mergeSchemas(s1: object, s2: object) {
     return _.merge({}, s1, s2);
 }
+
+export function resolveSchemaUrl(baseUrl: string, newRef: string) {
+    return new URL(newRef, baseUrl).href;
+}
