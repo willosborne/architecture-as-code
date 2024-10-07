@@ -63,10 +63,11 @@ program.command('template')
     .description('Template Kubernetes resources using CALM architecture as code')
     .argument('<document>', 'File containing a CALM pattern instantiation to generate from')
     .requiredOption('-t, --templates <DIRECTORY>', 'Directory of Handlebars templates to populate')
+    .requiredOption('-c, --config <CONFIG', 'Config file')
     .option('-o, --output <DIRECTORY>', 'Directory to output files to. If not set, output to STDOUT separated by --')
     .option('-v, --verbose', 'Whether to do verbose level logging', false)
     .action(async (arg, options) => {
-        await template(arg, options.templates, options.verbose, options.output); 
+        await template(arg, options.templates, options.config, options.verbose, options.output); 
     });
 
 program.parse(process.argv);

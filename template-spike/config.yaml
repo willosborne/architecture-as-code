@@ -1,0 +1,87 @@
+# better locality and typing
+# more duplication in the case that templates are re-used across nodes or relationships
+pattern: "https://raw.githubusercontent.com/finos/architecture-as-code/main/calm/domains-example/pattern/secure-service-pattern.json"
+# global:
+#   properties:  # not sure about this. should this be a global constant that applies to all templates, or is this about definining something per-template to reduce duplication?
+#     appName: $.nodes['application'].name
+#     databaseName: $.nodes['database'].name
+nodes:
+  - unique-id: application
+    templates:
+      - filename: application-service.yaml
+        properties:
+          port: $.interfaces[1].port
+          applicationPort: $.interfaces[1].port
+          serviceName: $['unique-id']
+          applicationName: $['unique-id']
+      - filename: application-deployment.yaml
+        properties:
+          applicationPort: $.interfaces[1].port
+          applicationImage: $.interfaces[0].image
+          applicationName: $['unique-id']
+      - filename: namespace.yaml
+        properties:
+          namespaceName: $['unique-id']
+      - filename: kustomization.yaml
+        properties:
+          namespaceName: $.name
+  - unique-id: postgres-database
+    templates:
+      - filename: database-service.yaml
+        properties:
+          port: $.interfaces[1].port
+          databasePort: $.interfaces[1].port
+          serviceName: $['unique-id']
+          databaseName: $['unique-id']
+      - filename: database-deployment.yaml
+        properties:
+          databasePort: $.interfaces[1].port
+          databaseImage: $.interfaces[0].image
+          databaseName: $['unique-id']
+relationships: 
+  - unique-id: consumer-load-balancer
+    templates: 
+      - filename: networkpolicy-allow-external-ingress.yaml
+        properties:
+          applicationName: abcd
+  - unique-id: load-balancer-application
+  - unique-id: application-postgres-database
+    templates:
+      - filename: networkpolicy-allow-egress-from-app-to-db.yaml
+        properties:
+          applicationName: abcd
+          databaseName: asdfasdf
+      - filename: networkpolicy-allow-ingress-to-db-from-app.yaml
+        properties:
+          applicationName: abcd
+          databaseName: asdfasdf
+#   - unique-id: "application-database"
+#     templates:
+#       - filename: ingress.yaml
+#         properties:
+#           from: $.relationship-type.connects.destination.node
+#           to: $.relationship-type.connects.source.node
+#           port: $.destination.interfaces['port'].port # CLI populates 'source' and 'destination' for relationships
+#           security-mode: $.destination.domains['security'].security-mode # fictional domains example
+#       - filename: egress.yaml
+#         properties:
+#           from: $.relationship-type.connects.source.node
+#           to: $.relationship-type.connects.destination.node
+#   - unique-id: "consumer-load-balancer" # this doesn't exist, but it's an example
+#     templates: 
+#       - filename: ingress-external.yaml
+#         properties:
+#           to: $.relationship-type.connects.source.node
+
+#   - unique-id: "application-database"
+#     templates:
+#       - filename: ingress.yaml
+#         properties:
+#           from: $.relationship-type.connects.destination.node
+#           to: $.relationship-type.connects.source.node
+#           port: $.destination.interfaces['port'].port # CLI populates 'source' and 'destination' for relationships
+#           security-mode: $.destination.domains['security'].security-mode # fictional domains example
+#       - filename: egress.yaml
+#         properties:
+#           from: $.relationship-type.connects.source.node
+#           to: $.relationship-type.connects.destination.node

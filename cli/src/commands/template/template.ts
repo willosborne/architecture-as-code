@@ -1,7 +1,9 @@
 import Handlebars from "handlebars";
 import { promises as fs } from 'node:fs';
-import { buildParameters, parseCalmDoc } from "./parse-calm.js";
+import { getCalmNodeById, parseTemplatePropertiesFromCalmObject } from "./parse-calm.js";
 import path from "node:path";
+import { ConstantProperties, ExtractedProperties, NodeConfig, parsePatternConfig, TemplateConfig } from "./model/pattern-config.js";
+import { combinePropertes } from "./utils.js";
 
 
 async function loadCalm(filename: string, debug: boolean) {
@@ -12,17 +14,17 @@ async function loadCalm(filename: string, debug: boolean) {
     return JSON.parse(data);
 }
 
-async function loadTemplatesInDirectory(directory: string): Promise<{ [filename: string]: HandlebarsTemplateDelegate<any> }> {
+async function loadTemplatesInDirectory(directory: string): Promise<Map<string, HandlebarsTemplateDelegate>> {
     const files = await fs.readdir(directory);
-    const loadedFiles: { [filename: string]: HandlebarsTemplateDelegate<any> } = {};
+    const output = new Map<string, HandlebarsTemplateDelegate>()
 
     for (const file of files) {
         const filePath = path.join(directory, file);
         const fileContent = await fs.readFile(filePath, { encoding: 'utf-8' });
-        loadedFiles[file] = Handlebars.compile(fileContent);
+        output.set(file, Handlebars.compile(fileContent))
     }
 
-    return loadedFiles;
+    return output;
 }
 
 function initHandlebars() {
@@ -33,7 +35,7 @@ function initHandlebars() {
     })
 }
 
-export default async function(filename: string, templatesPath: string, debug: boolean, output: string) {
+export default async function(filename: string, templatesPath: string, configFilename: string, debug: boolean, output: string) {
     if (debug)
         console.log("generating from " + filename);
 
@@ -44,19 +46,32 @@ export default async function(filename: string, templatesPath: string, debug: bo
         console.log("Loaded CALM: ", calm);
     }
 
-    const calmProperties = parseCalmDoc(calm);
-
-    const parameters = buildParameters(calmProperties);
-
     const templates = await loadTemplatesInDirectory(templatesPath);
+
+    const patternConfig = await parsePatternConfig(configFilename);
+    const globalProperties = !!patternConfig?.globals?.properties 
+        ? parseTemplatePropertiesFromCalmObject(patternConfig.globals.properties, calm) 
+        : {};
+
+    const constants = !!patternConfig?.globals?.constants 
+        ? patternConfig.globals.constants
+        : {}; 
 
     if (debug) console.log(templates);
 
     const outputValues = new Map<string, string>();
 
-    for (const templateName in templates) {
-        const template = templates[templateName];
-        outputValues.set(templateName, template(parameters));
+    for (const nodeConfig of patternConfig.nodes) {
+        const nodeValues = await generateNode(nodeConfig, globalProperties, constants, templates, calm);
+        for (const [id, value] of nodeValues) {
+            if (outputValues.has(id)) {
+                console.error(`Duplicate output filename ${id}! You are using the same template multiple times.`)
+                console.error('Please use the `output-filename` property on your template config to disambiguate.')
+                process.exit(1);
+            }
+            outputValues.set(id, value);
+        }
+        // outputValues.push(...);
     }
 
     if (!output) {
@@ -67,6 +82,46 @@ export default async function(filename: string, templatesPath: string, debug: bo
         await writeFiles(output, outputValues);
     }
 }
+
+async function generateNode(
+        config: NodeConfig, 
+        globalProperties: ExtractedProperties, 
+        constants: ConstantProperties, 
+        compiledTemplates: Map<string, HandlebarsTemplateDelegate>, 
+        calmDocument: object
+    ): Promise<[string, string][]> {
+
+    const calmObject = getCalmNodeById(config['unique-id'], calmDocument);
+    console.log("calm object parsed: " + JSON.stringify(calmObject))
+    const output = [];
+
+    for (const templateConfig of config.templates) {
+        const template = compiledTemplates.get(templateConfig.filename);
+        const properties: ExtractedProperties = parseTemplatePropertiesFromCalmObject(
+            templateConfig.properties, calmObject
+        );
+
+        const merged = combinePropertes(properties, globalProperties, constants)
+        const id = getOutputFilename(templateConfig, config['unique-id']);
+        output.push([id, template(merged)]);
+    }
+
+    return output;
+}
+
+function getOutputFilename(templateConfig: TemplateConfig, uniqueId: string) {
+    return templateConfig['output-filename'] ?? templateConfig.filename;
+    // let suffix = templateConfig.filename;
+    // if (!!templateConfig["output-filename"]) {
+    //     // suffix = `${templateConfig.name}.${getFileExtension(templateConfig.filename)}`;
+    // }
+    // return  `${uniqueId}-${suffix}`
+}
+
+// function getFileExtension(filename: string) {
+//     var re = /(?:\.([^.]+))?$/; // get everything after the last . in the filename
+//     return re.exec(filename)[1];
+// }
 
 async function writeFiles(outputDirectory: string, outputFiles: Map<string, string>) {
     console.log(`Writing files to directory '${outputDirectory}'`)
