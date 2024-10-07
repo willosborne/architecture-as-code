@@ -1,7 +1,7 @@
 import Handlebars from "handlebars";
 import { promises as fs } from 'node:fs';
-import { getCalmNodeById, parseTemplatePropertiesFromCalmObject } from "./parse-calm.js";
-import path from "node:path";
+import { getCalmNodeById, getCalmRelationshipById, parseTemplatePropertiesFromCalmObject } from "./parse-calm.js";
+import path, { relative } from "node:path";
 import { ConstantProperties, ExtractedProperties, NodeConfig, parsePatternConfig, TemplateConfig } from "./model/pattern-config.js";
 import { combinePropertes } from "./utils.js";
 
@@ -71,7 +71,18 @@ export default async function(filename: string, templatesPath: string, configFil
             }
             outputValues.set(id, value);
         }
-        // outputValues.push(...);
+    }
+
+    for (const relationshipConfig of patternConfig.relationships) {
+        const relationshipValues = await generateRelationship(relationshipConfig, globalProperties, constants, templates, calm);
+        for (const [id, value] of relationshipValues) {
+            if (outputValues.has(id)) {
+                console.error(`Duplicate output filename ${id}! You are using the same template multiple times.`)
+                console.error('Please use the `output-filename` property on your template config to disambiguate.')
+                process.exit(1);
+            }
+            outputValues.set(id, value);
+        }
     }
 
     if (!output) {
@@ -109,19 +120,36 @@ async function generateNode(
     return output;
 }
 
-function getOutputFilename(templateConfig: TemplateConfig, uniqueId: string) {
-    return templateConfig['output-filename'] ?? templateConfig.filename;
-    // let suffix = templateConfig.filename;
-    // if (!!templateConfig["output-filename"]) {
-    //     // suffix = `${templateConfig.name}.${getFileExtension(templateConfig.filename)}`;
-    // }
-    // return  `${uniqueId}-${suffix}`
+async function generateRelationship(
+        config: NodeConfig, 
+        globalProperties: ExtractedProperties, 
+        constants: ConstantProperties, 
+        compiledTemplates: Map<string, HandlebarsTemplateDelegate>, 
+        calmDocument: object
+    ): Promise<[string, string][]> {
+
+    const calmObject = getCalmRelationshipById(config['unique-id'], calmDocument);
+    console.log("calm object parsed: " + JSON.stringify(calmObject))
+    const output = [];
+
+    console.log(JSON.stringify(config))
+    for (const templateConfig of config.templates) {
+        const template = compiledTemplates.get(templateConfig.filename);
+        const properties: ExtractedProperties = parseTemplatePropertiesFromCalmObject(
+            templateConfig.properties, calmObject
+        );
+
+        const merged = combinePropertes(properties, globalProperties, constants)
+        const id = getOutputFilename(templateConfig, config['unique-id']);
+        output.push([id, template(merged)]);
+    }
+
+    return output;
 }
 
-// function getFileExtension(filename: string) {
-//     var re = /(?:\.([^.]+))?$/; // get everything after the last . in the filename
-//     return re.exec(filename)[1];
-// }
+function getOutputFilename(templateConfig: TemplateConfig, uniqueId: string) {
+    return templateConfig['output-filename'] ?? templateConfig.filename;
+}
 
 async function writeFiles(outputDirectory: string, outputFiles: Map<string, string>) {
     console.log(`Writing files to directory '${outputDirectory}'`)

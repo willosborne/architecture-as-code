@@ -5,6 +5,7 @@ export interface PatternConfig {
     pattern: string;
     globals: Globals;
     nodes: Array<NodeConfig>;
+    relationships: Array<NodeConfig>; // TODO
 }
 
 export interface NodeConfig { 

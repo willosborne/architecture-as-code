@@ -35,28 +35,45 @@ export function parseTemplatePropertiesFromCalmObject(requestedProperties: Prope
     const out: ExtractedProperties = {}
     Object.keys(requestedProperties).forEach((key) => {
         console.log("Calm object: " + JSON.stringify(calmObject))
-        const path = requestedProperties[key]
-        console.log("path: " + path)
+        const value = requestedProperties[key]
+        if (isJsonPath(value)) {
+            console.log("jsonpath: " + value)
 
-        assertUnique(calmObject, path, "Could not find a match for for the requested JSONPath " + path)
-        const value: string = jp.value(calmObject, path)
+            assertUnique(calmObject, value, "Could not find a match for for the requested JSONPath " + value)
+            const resolvedValue: string = jp.value(calmObject, value)
 
-        if (!value) {
-            console.error("Coudn't find a key for the given json path in the CALM document. " +
-                "Key: ", key, ", JSONPath: ", path);
-            throw Error("bad jsonpath")
+            if (!resolvedValue) {
+                console.error("Coudn't find a key for the given json path in the CALM document. " +
+                    "Key: ", key, ", JSONPath: ", value);
+                throw Error("bad jsonpath")
+            }
+
+            out[key] = resolvedValue;
         }
-
-        out[key] = value;
+        else {
+            out[key] = value
+        }
     })
 
     return out;
+}
+
+function isJsonPath(val: string) {
+    return /\$/.test(val)
 }
 
 export function getCalmNodeById(uniqueId: string, calmDocument: object): object {
     const jsonPath = `$.nodes[?(@["unique-id"]=='${uniqueId}')]`;
 
     assertUnique(calmDocument, jsonPath, "No node, or multiple, found with unique-id " + uniqueId)
+    const node = jp.value(calmDocument, jsonPath)
+    return node
+}
+
+export function getCalmRelationshipById(uniqueId: string, calmDocument: object): object {
+    const jsonPath = `$.relationships[?(@["unique-id"]=='${uniqueId}')]`;
+
+    assertUnique(calmDocument, jsonPath, "No relationship, or multiple, found with unique-id " + uniqueId)
     const node = jp.value(calmDocument, jsonPath)
     return node
 }

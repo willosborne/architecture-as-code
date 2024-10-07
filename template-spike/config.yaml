@@ -44,7 +44,7 @@ relationships:
       - filename: networkpolicy-allow-external-ingress.yaml
         properties:
           applicationName: abcd
-  - unique-id: load-balancer-application
+          applicationPort: 12345
   - unique-id: application-postgres-database
     templates:
       - filename: networkpolicy-allow-egress-from-app-to-db.yaml
@@ -55,33 +55,3 @@ relationships:
         properties:
           applicationName: abcd
           databaseName: asdfasdf
-#   - unique-id: "application-database"
-#     templates:
-#       - filename: ingress.yaml
-#         properties:
-#           from: $.relationship-type.connects.destination.node
-#           to: $.relationship-type.connects.source.node
-#           port: $.destination.interfaces['port'].port # CLI populates 'source' and 'destination' for relationships
-#           security-mode: $.destination.domains['security'].security-mode # fictional domains example
-#       - filename: egress.yaml
-#         properties:
-#           from: $.relationship-type.connects.source.node
-#           to: $.relationship-type.connects.destination.node
-#   - unique-id: "consumer-load-balancer" # this doesn't exist, but it's an example
-#     templates: 
-#       - filename: ingress-external.yaml
-#         properties:
-#           to: $.relationship-type.connects.source.node
-
-#   - unique-id: "application-database"
-#     templates:
-#       - filename: ingress.yaml
-#         properties:
-#           from: $.relationship-type.connects.destination.node
-#           to: $.relationship-type.connects.source.node
-#           port: $.destination.interfaces['port'].port # CLI populates 'source' and 'destination' for relationships
-#           security-mode: $.destination.domains['security'].security-mode # fictional domains example
-#       - filename: egress.yaml
-#         properties:
-#           from: $.relationship-type.connects.source.node
-#           to: $.relationship-type.connects.destination.node
