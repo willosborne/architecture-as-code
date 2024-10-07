@@ -43,15 +43,16 @@ relationships:
     templates: 
       - filename: networkpolicy-allow-external-ingress.yaml
         properties:
-          applicationName: abcd
+          # applicationName: $['relationship-type'].connects.destination.node
+          applicationName: asdfasf
           applicationPort: 12345
   - unique-id: application-postgres-database
     templates:
       - filename: networkpolicy-allow-egress-from-app-to-db.yaml
         properties:
-          applicationName: abcd
-          databaseName: asdfasdf
+          applicationName: $['relationship-type'].connects.source.node
+          databaseName: $['relationship-type'].connects.destination.node
       - filename: networkpolicy-allow-ingress-to-db-from-app.yaml
         properties:
-          applicationName: abcd
-          databaseName: asdfasdf
+          applicationName: $['relationship-type'].connects.source.node
+          databaseName: $['relationship-type'].connects.destination.node
