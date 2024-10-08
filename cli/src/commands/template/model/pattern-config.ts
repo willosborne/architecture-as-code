@@ -1,5 +1,5 @@
-import { readFile } from "fs/promises";
-import { parse } from "yaml";
+import { readFile } from 'fs/promises';
+import { parse } from 'yaml';
 
 export interface PatternConfig {
     pattern: string;
