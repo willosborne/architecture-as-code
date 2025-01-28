@@ -53,6 +53,17 @@ program
     });
 
 
+program
+    .command('bundle')
+    .description('bundle stuff')
+    .requiredOption(PATTERN_OPTION, 'Path to the pattern file to use. Must be a file path')
+    .requiredOption(ARCHITECTURE_OPTION, 'Path to the architecture file to use. Must be a file path.')
+    .requiredOption(OUTPUT_OPTION, 'Directory to output the bundle to.')
+    .option(SCHEMAS_OPTION, 'Path to directory containing schemas to include while bundling', CALM_META_SCHEMA_DIRECTORY)
+    .action(async (options) => {
+        await bundlePatternArchitecture(options.architecture, options.pattern, options.schemaDirectory, options.output)
+    })
+
 /**
  * Run the validate command and exit with the right status code based on the result.
  * @param options Options passed through from the argument parser.

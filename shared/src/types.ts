@@ -5,6 +5,8 @@ export interface CALMArchitecture {
 
 export type NodeType = 'actor' | 'system' | 'service' | 'database' | 'network' | 'ldap' | 'dataclient';
 
+export type CALMDocumentType = 'schema' | 'pattern' | 'architecture' | 'flow' | 'control'
+
 export interface CALMNode {
   name: string, 
   class?: string,

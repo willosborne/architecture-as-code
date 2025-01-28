@@ -4,6 +4,7 @@ import pointer from 'json-pointer';
 import { mergeSchemas, updateStringValuesRecursively } from './util.js';
 import { Logger } from 'winston';
 import { initLogger } from './commands/helper.js';
+import { CALMDocumentType } from './types.js';
 
 /**
  * Stores a directory of schemas and resolves references against that directory.
@@ -11,6 +12,7 @@ import { initLogger } from './commands/helper.js';
  */
 export class SchemaDirectory {
     private readonly schemas: Map<string, object> = new Map<string, object>();
+    private readonly documentTypes: Map<string, CALMDocumentType> = new Map<string, CALMDocumentType>();
     private readonly logger: Logger;
 
     /**
@@ -47,6 +49,8 @@ export class SchemaDirectory {
             }
 
             map.forEach((val, key) => this.schemas.set(key, val));
+            // assume everything is loaded as a schema
+            map.forEach((_, key) => this.documentTypes.set(key, 'schema'))
             this.logger.info(`Loaded ${this.schemas.size} schemas.`);
             this.schemas.forEach((_schema, id) => {
                 this.logger.debug(`Schema ID: ${id}`);
@@ -179,5 +183,15 @@ export class SchemaDirectory {
         this.logger.debug('Loaded schema with $id: ' + schemaId);
         
         return parsed;
+    }
+
+    public static getSchemaName(ref: string): string | null {
+        if (ref.startsWith('#')) {
+            return null;
+        }
+        if (ref.includes('#')) {
+            return ref.split('#')[0];
+        }
+        return ref;
     }
 }
