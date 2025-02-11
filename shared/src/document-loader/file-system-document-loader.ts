@@ -1,20 +1,18 @@
-import { Logger } from "winston";
-import { CalmDocumentType } from "../types";
-import { DocumentLoader } from "./document-loader";
-import { initLogger } from "../commands/helper";
-import { readdir, readFile } from "fs/promises";
-import { join } from "path";
-import { SchemaDirectory } from "../schema-directory";
+import { Logger } from 'winston';
+import { CalmDocumentType } from '../types';
+import { DocumentLoader, DocumentLoadError } from './document-loader';
+import { initLogger } from '../logger';
+import { readdir, readFile } from 'fs/promises';
+import { join } from 'path';
+import { SchemaDirectory } from '../schema-directory';
 
 export class FileSystemDocumentLoader implements DocumentLoader {
     private readonly logger: Logger;
     private readonly directoryPaths: string[];
-    // private schemaDirectory: SchemaDirectory;
 
     constructor(directoryPaths: string[], debug: boolean) {
         this.logger = initLogger(debug);
         this.directoryPaths = directoryPaths;
-        // this.schemaDirectory = schemaDirectory;
     }
 
     async initialise(schemaDirectory: SchemaDirectory): Promise<void> {
@@ -25,8 +23,6 @@ export class FileSystemDocumentLoader implements DocumentLoader {
 
     async loadDocumentsFromDirectory(schemaDirectory: SchemaDirectory, directoryPath: string): Promise<void> {
         try {
-            // const map = new Map<string, object>();
-
             this.logger.debug('Loading schemas from ' + directoryPath);
             const files = await readdir(directoryPath, { recursive: true });
 
@@ -35,9 +31,9 @@ export class FileSystemDocumentLoader implements DocumentLoader {
 
             for (const schemaPath of schemaPaths) {
                 const schemaDef = await this.loadDocument(schemaPath);
-                const schemaId = schemaDef['$id']
-                schemaDirectory.storeDocument(schemaId, 'schema', schemaDef)
-                this.logger.debug(`Loaded schema with ID ${schemaId} from ${schemaPath}.`)
+                const schemaId = schemaDef['$id'];
+                schemaDirectory.storeDocument(schemaId, 'schema', schemaDef);
+                this.logger.debug(`Loaded schema with ID ${schemaId} from ${schemaPath}.`);
             }
         } catch (err) {
             if (err.code === 'ENOENT') {
@@ -50,10 +46,13 @@ export class FileSystemDocumentLoader implements DocumentLoader {
     }
 
     async loadMissingDocument(documentId: string, type: CalmDocumentType): Promise<object> {
-        const errorMessage = `Document with id [${documentId}] was requested but not loaded at initialisation. 
-            File system document loader can only load at startup. Please ensure the schemas are present on your directory path or use CALMHub.`
+        const errorMessage = `Document with id [${documentId}] and type [${type}] was requested but not loaded at initialisation. 
+            File system document loader can only load at startup. Please ensure the schemas are present on your directory path or use CALMHub.`;
         this.logger.error(errorMessage);
-        throw new Error(errorMessage);
+        throw new DocumentLoadError({
+            name: 'OPERATION_NOT_IMPLEMENTED',
+            message: errorMessage
+        });
     }
 
     private async loadDocument(schemaPath: string): Promise<object> {

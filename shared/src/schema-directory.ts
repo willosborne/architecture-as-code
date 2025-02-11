@@ -3,7 +3,7 @@ import { mergeSchemas, updateStringValuesRecursively } from './util.js';
 import { Logger } from 'winston';
 import { initLogger } from './logger.js';
 import { CalmDocumentType } from './types.js';
-import { DocumentLoader } from './document-loader/document-loader.js';
+import { DocumentLoader, DocumentLoadError } from './document-loader/document-loader.js';
 
 /**
  * Stores a directory of schemas and resolves references against that directory.
@@ -13,7 +13,7 @@ export class SchemaDirectory {
     private readonly schemas: Map<string, object> = new Map<string, object>();
     private readonly schemaTypes: Map<string, CalmDocumentType> = new Map<string, CalmDocumentType>();
     private readonly logger: Logger;
-    private readonly PATTERN_CURRENTLY_VALIDATING = 'patternCurrentlyValidating'
+    private readonly PATTERN_CURRENTLY_VALIDATING = 'patternCurrentlyValidating';
     private documentLoader: DocumentLoader;
 
     /**
@@ -29,13 +29,13 @@ export class SchemaDirectory {
     public loadCurrentPatternAsSchema(pattern: object) {
         this.logger.debug('Loading current pattern as a schema.');
         this.schemas.set(this.PATTERN_CURRENTLY_VALIDATING, pattern);
-        this.schemaTypes.set(this.PATTERN_CURRENTLY_VALIDATING, 'pattern')
+        this.schemaTypes.set(this.PATTERN_CURRENTLY_VALIDATING, 'pattern');
     }
 
     /**
-     * Initialise
+     * Initialise the SchemaDirectory. If the DocumentLoader implementation loads documents on startup, they will be loaded here.
      */
-    public async loadSchemas(dir: string): Promise<void> {
+    public async loadSchemas(): Promise<void> {
         await this.documentLoader.initialise(this);
     }
 
@@ -58,8 +58,8 @@ export class SchemaDirectory {
         const definition = await this.lookupDefinition(newSchemaId, ref);
         if (!definition) {
             // schema not defined
-            // TODO enforce this once we can guarantee we always have schemas available
-            throw Error("schema missing!")
+            // schemaDirectory will return an empty schema in this case, so this code should never trigger.
+            throw Error('schema missing!');
         }
         if (!definition['$ref']) {
             this.logger.debug('Reached a definition with no ref, terminating recursive lookup.');
@@ -129,14 +129,22 @@ export class SchemaDirectory {
      */
     public async getSchema(schemaId: string): Promise<object> {
         if (!this.schemas.has(schemaId)) {
-            const registered = this.getLoadedSchemas();
-            // TODO type
-            const document = await this.documentLoader.loadMissingDocument(schemaId, 'schema');
-            this.storeDocument(schemaId, 'schema', document);
+            try {
+                const document = await this.documentLoader.loadMissingDocument(schemaId, 'schema');
+                this.storeDocument(schemaId, 'schema', document);
 
-            return document
-            // this.logger.warn(`Schema with $id ${schemaId} not found. Returning empty object. Registered schemas: ${registered}`);
-            // return undefined;
+                return document;
+            } 
+            catch (err) {
+                if (err instanceof DocumentLoadError) {
+                    if (err.name === 'OPERATION_NOT_IMPLEMENTED') {
+                        const registered = this.getLoadedSchemas();
+                        this.logger.warn(`Schema with $id ${schemaId} not found. Returning empty object. Registered schemas: ${registered}`);
+                        return undefined;
+                    } 
+                }
+                throw err;
+            }
         }
         return this.schemas.get(schemaId);
     }
