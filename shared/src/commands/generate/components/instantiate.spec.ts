@@ -25,7 +25,7 @@ beforeEach(() => {
 
 
 describe('instantiateGenericObject', () => {
-    it('instantiate object with simple properties', () => {
+    it('instantiate object with simple properties', async () => {
         const objectDef = {
             'type': 'object',
             'properties': {
@@ -43,7 +43,8 @@ describe('instantiateGenericObject', () => {
                 }
             }
         };
-        expect(instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true))
+        const result = await instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'string-prop': '{{ STRING_PROP }}',
@@ -54,7 +55,7 @@ describe('instantiateGenericObject', () => {
             );
     });
     
-    it('instantiate object with nested object properties', () => {
+    it('instantiate object with nested object properties', async () => {
         const objectDef = {
             'type': 'object',
             'properties': {
@@ -68,7 +69,8 @@ describe('instantiateGenericObject', () => {
                 }
             }
         };
-        expect(instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true))
+        const result = await instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'property-name': {
@@ -78,7 +80,7 @@ describe('instantiateGenericObject', () => {
             );
     });
 
-    it('instantiate object with $ref', () => {
+    it('instantiate object with $ref', async () => {
         const reference =  'http://calm.com/example-ref';
         const objectDef = {
             '$ref': reference
@@ -102,7 +104,8 @@ describe('instantiateGenericObject', () => {
         spy.mockReturnValue(returnedDef);
 
 
-        expect(instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true))
+        const result = await instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'property-name': {
@@ -113,7 +116,7 @@ describe('instantiateGenericObject', () => {
         expect(spy).toHaveBeenCalledWith(reference);
     });
 
-    it('instantiate object with simple array property to placeholder', () => {
+    it('instantiate object with simple array property to placeholder', async () => {
         const objectDef = {
             'type': 'object',
             'properties': {
@@ -123,7 +126,8 @@ describe('instantiateGenericObject', () => {
                 }
             }
         };
-        expect(instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true))
+        const result = await instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'property-name': [ 
@@ -133,7 +137,7 @@ describe('instantiateGenericObject', () => {
             );
     });
     
-    it('instantiate object with complex/prefixItems array property', () => {
+    it('instantiate object with complex/prefixItems array property', async () => {
         const objectDef = {
             'type': 'object',
             'properties': {
@@ -152,7 +156,8 @@ describe('instantiateGenericObject', () => {
                 }
             }
         };
-        expect(instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true))
+        const result = await instantiateGenericObject(objectDef, mockSchemaDir, 'generic', [], false, true)
+        expect(result)
             .toEqual(
                 {
                     'property-name': [ 

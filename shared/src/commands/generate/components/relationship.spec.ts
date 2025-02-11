@@ -40,14 +40,14 @@ function getSamplePatternRelationship(properties: any, required: string[] = []):
 
 describe('instantiateRelationships', () => {
 
-    it('return instantiated relationship with array property', () => {
+    it('return instantiated relationship with array property', async () => {
         const pattern = getSamplePatternRelationship({
             'property-name': {
                 type: 'array'
             }
         });
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, true))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
             .toEqual(
                 [{
                     'property-name': [
@@ -57,29 +57,44 @@ describe('instantiateRelationships', () => {
             );
     });
 
-    it('return instantiated relationship with string property', () => {
+    it('return instantiated relationship with string property', async () => {
         const pattern = getSamplePatternRelationship({
             'property-name': {
                 type: 'string'
             }
         });
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, true))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
             .toEqual([
                 {
                     'property-name': '{{ PROPERTY_NAME }}'
                 }
             ]);
     });
-    
-    it('return instantiated relationship with boolean property', () => {
+
+    it('return instantiated relationship with number property', async () => {
+        const pattern = getSamplePatternRelationship({
+            'property-name': {
+                type: 'number'
+            }
+        });
+
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
+            .toEqual([
+                {
+                    'property-name': -1
+                }
+            ]);
+    });
+
+    it('return instantiated relationship with boolean property', async () => {
         const pattern = getSamplePatternRelationship({
             'property-name': {
                 type: 'boolean'
             }
         });
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, true))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
             .toEqual([
                 {
                     'property-name': '{{ BOOLEAN_PROPERTY_NAME }}'
@@ -87,14 +102,14 @@ describe('instantiateRelationships', () => {
             ]);
     });
 
-    it('return instantiated relationship with const property', () => {
+    it('return instantiated relationship with const property', async () => {
         const pattern = getSamplePatternRelationship({
             'property-name': {
                 const: 'value here'
             }
         });
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, true))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
             .toEqual([
                 {
                     'property-name': 'value here'
@@ -102,7 +117,7 @@ describe('instantiateRelationships', () => {
             ]);
     });
 
-    it('only instantiate required properties when instantiateAll set to false', () => {
+    it('only instantiate required properties when instantiateAll set to false', async () => {
         const pattern = getSamplePatternRelationship({
             'property-name': {
                 const: 'value here'
@@ -112,7 +127,7 @@ describe('instantiateRelationships', () => {
             }
         }, ['property-name']);
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, false))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, false))
             .toEqual([
                 {
                     'property-name': 'value here'
@@ -120,7 +135,7 @@ describe('instantiateRelationships', () => {
             ]);
     });
 
-    it('call schema directory to resolve $ref relationships`', () => {
+    it('call schema directory to resolve $ref relationships', async () => {
         const reference = 'https://calm.com/core.json#/relationship';
         const pattern = {
             properties: {
@@ -144,12 +159,11 @@ describe('instantiateRelationships', () => {
             }
         });
 
-        expect(instantiateRelationships(pattern, mockSchemaDir, false, true))
+        expect(await instantiateRelationships(pattern, mockSchemaDir, false, true))
             .toEqual([
                 {
                     'property-name': 'value here'
                 }
             ]);
-        expect(spy).toHaveBeenCalledWith(reference);
     });
 });

@@ -40,13 +40,14 @@ function getSamplePatternNode(properties: any, required: any = []): any {
 
 
 describe('instantiateNodes', () => {
-    it('return instantiated required node with array property', () => {
+    it('return instantiated required node with array property', async () => {
         const pattern = getSamplePatternNode({
             'property-name': {
                 type: 'array'
             }
         });
-        expect(instantiateNodes(pattern, mockSchemaDir, false, true))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, true)
+        expect(result)
             .toEqual(
                 [{
                     'property-name': [
@@ -56,14 +57,14 @@ describe('instantiateNodes', () => {
             );
     });
 
-    it('return instantiated node with string property', () => {
+    it('return instantiated node with string property', async () => {
         const pattern = getSamplePatternNode({
             'property-name': {
                 type: 'string'
             }
         });
-
-        expect(instantiateNodes(pattern, mockSchemaDir, false, true))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, true);
+        expect(result)
             .toEqual([
                 {
                     'property-name': '{{ PROPERTY_NAME }}'
@@ -71,14 +72,15 @@ describe('instantiateNodes', () => {
             ]);
     });
 
-    it('return instantiated node with const property', () => {
+    it('return instantiated node with const property', async () => {
         const pattern = getSamplePatternNode({
             'property-name': {
                 const: 'value here'
             }
         });
 
-        expect(instantiateNodes(pattern, mockSchemaDir, false, true))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, true);
+        expect(result)
             .toEqual([
                 {
                     'property-name': 'value here'
@@ -86,14 +88,15 @@ describe('instantiateNodes', () => {
             ]);
     });
     
-    it('return instantiated node with boolean property', () => {
+    it('return instantiated node with boolean property', async () => {
         const pattern = getSamplePatternNode({
             'property-name': {
                 'type': 'boolean'
             }
         });
 
-        expect(instantiateNodes(pattern, mockSchemaDir, false, true))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, true)
+        expect(result)
             .toEqual([
                 {
                     'property-name': '{{ BOOLEAN_PROPERTY_NAME }}'
@@ -101,7 +104,7 @@ describe('instantiateNodes', () => {
             ]);
     });
     
-    it('only instantiate required properties when instantiateAll set to false', () => {
+    it('only instantiate required properties when instantiateAll set to false', async () => {
         const pattern = getSamplePatternNode({
             'property-name': {
                 const: 'value here'
@@ -111,7 +114,8 @@ describe('instantiateNodes', () => {
             }
         }, ['property-name']);
 
-        expect(instantiateNodes(pattern, mockSchemaDir, false, false))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, false)
+        expect(result)
             .toEqual([
                 {
                     'property-name': 'value here'
@@ -119,7 +123,7 @@ describe('instantiateNodes', () => {
             ]);
     });
 
-    it('call schema directory to resolve $ref nodes`', () => {
+    it('call schema directory to resolve $ref nodes`', async () => {
         const reference = 'https://calm.com/core.json#/node';
         const pattern = {
             properties: {
@@ -143,7 +147,8 @@ describe('instantiateNodes', () => {
             }
         });
 
-        expect(instantiateNodes(pattern, mockSchemaDir, false, true))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, true)
+        expect(result)
             .toEqual([
                 {
                     'property-name': 'value here'
@@ -152,7 +157,7 @@ describe('instantiateNodes', () => {
         expect(spy).toHaveBeenCalledWith(reference);
     });
 
-    it('return instantiated node with interfaces, even when not marked as required', () => {
+    it('return instantiated node with interfaces, even when not marked as required', async () => {
         const pattern = {
             properties: {
                 nodes: {
@@ -197,7 +202,8 @@ describe('instantiateNodes', () => {
             }
         ];
 
-        expect(instantiateNodes(pattern, mockSchemaDir, false, false))
+        const result = await instantiateNodes(pattern, mockSchemaDir, false, false);
+        expect(result)
             .toEqual(expected);
 
     });

@@ -2,13 +2,15 @@ import { runGenerate } from './generate';
 import { tmpdir } from 'node:os';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { DocumentLoaderOptions } from '@finos/calm-shared/document-loader/document-loader';
 
 jest.mock('../../logger', () => {
     return {
         initLogger: () => {
             return {
                 info: () => {},
-                debug: () => {}
+                debug: () => {},
+                error: () => {}
             };
         }
     };
@@ -20,6 +22,16 @@ jest.mock('../../consts', () => ({
     get CALM_META_SCHEMA_DIRECTORY() { return '../calm/draft/2024-10/meta'; }
 }));
 
+jest.mock('../../document-loader/document-loader', () => {
+    buildDocumentLoader: jest.fn();
+})
+
+function getMockDocLoaderOpts(): DocumentLoaderOptions {
+    return {
+        schemaDirectoryPath: 'test_fixtures',
+        loadMode: 'filesystem'
+    }
+}
 
 describe('runGenerate', () => {
     let tempDirectoryPath;
@@ -33,39 +45,39 @@ describe('runGenerate', () => {
         rmSync(tempDirectoryPath, { recursive: true, force: true });
     });
 
-    // it('instantiates to given directory', async () => {
-    //     const outPath = path.join(tempDirectoryPath, 'output.json');
-    //     await runGenerate(testPath, outPath, false, false);
+    it('instantiates to given directory', async () => {
+        const outPath = path.join(tempDirectoryPath, 'output.json');
+        await runGenerate(testPath, outPath, false, false, getMockDocLoaderOpts());
 
-    //     expect(existsSync(outPath))
-    //         .toBeTruthy();
-    // });
+        expect(existsSync(outPath))
+            .toBeTruthy();
+    });
 
-    // it('instantiates to given directory with nested folders', async () => {
-    //     const outPath = path.join(tempDirectoryPath, 'output/test/output.json');
-    //     await runGenerate(testPath, outPath, false, false);
+    it('instantiates to given directory with nested folders', async () => {
+        const outPath = path.join(tempDirectoryPath, 'output/test/output.json');
+        await runGenerate(testPath, outPath, false, false, getMockDocLoaderOpts());
 
-    //     expect(existsSync(outPath))
-    //         .toBeTruthy();
-    // });
+        expect(existsSync(outPath))
+            .toBeTruthy();
+    });
 
-    // it('instantiates to calm architecture file', async () => {
-    //     const outPath = path.join(tempDirectoryPath, 'output.json');
-    //     await runGenerate(testPath, outPath, false, false);
+    it('instantiates to calm architecture file', async () => {
+        const outPath = path.join(tempDirectoryPath, 'output.json');
+        await runGenerate(testPath, outPath, false, false, getMockDocLoaderOpts());
 
-    //     expect(existsSync(outPath))
-    //         .toBeTruthy();
+        expect(existsSync(outPath))
+            .toBeTruthy();
 
-    //     const spec = readFileSync(outPath, { encoding: 'utf-8' });
-    //     const parsed = JSON.parse(spec);
-    //     expect(parsed)
-    //         .toHaveProperty('nodes');
-    //     expect(parsed)
-    //         .toHaveProperty('relationships');
-    //     expect(parsed)
-    //         .toHaveProperty('$schema');
-    //     expect(parsed['$schema'])
-    //         .toEqual('https://raw.githubusercontent.com/finos/architecture-as-code/main/calm/pattern/api-gateway');
-    // });
+        const spec = readFileSync(outPath, { encoding: 'utf-8' });
+        const parsed = JSON.parse(spec);
+        expect(parsed)
+            .toHaveProperty('nodes');
+        expect(parsed)
+            .toHaveProperty('relationships');
+        expect(parsed)
+            .toHaveProperty('$schema');
+        expect(parsed['$schema'])
+            .toEqual('https://raw.githubusercontent.com/finos/architecture-as-code/main/calm/pattern/api-gateway');
+    });
 
 });

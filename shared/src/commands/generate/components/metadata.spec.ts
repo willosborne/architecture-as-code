@@ -22,7 +22,7 @@ beforeEach(() => {
 
 
 describe('instantiateMetadataObject', () => {
-    it('instantiate metadata object with simple properties', () => {
+    it('instantiate metadata object with simple properties', async () => {
         const metadataDef = {
             'type': 'object',
             'properties': {
@@ -40,7 +40,8 @@ describe('instantiateMetadataObject', () => {
                 }
             }
         };
-        expect(instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true))
+        const result = await instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true)
+        expect(result)
             .toEqual(
                 {
                     'string-prop': '{{ STRING_PROP }}',
@@ -51,7 +52,7 @@ describe('instantiateMetadataObject', () => {
             );
     });
     
-    it('instantiate metadata object with nested object properties', () => {
+    it('instantiate metadata object with nested object properties', async () => {
         const metadataDef = {
             'type': 'object',
             'properties': {
@@ -65,7 +66,8 @@ describe('instantiateMetadataObject', () => {
                 }
             }
         };
-        expect(instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true))
+        const result = await instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'property-name': {
@@ -75,7 +77,7 @@ describe('instantiateMetadataObject', () => {
             );
     });
 
-    it('instantiate metadata object with $ref', () => {
+    it('instantiate metadata object with $ref', async () => {
         const reference =  'http://calm.com/example-ref';
         const metadataDef = {
             '$ref': reference
@@ -98,8 +100,8 @@ describe('instantiateMetadataObject', () => {
         const spy = jest.spyOn(mockSchemaDir, 'getDefinition');
         spy.mockReturnValue(returnedDef);
 
-
-        expect(instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true))
+        const result = await instantiateMetadataObject(metadataDef, mockSchemaDir, [], false, true);
+        expect(result)
             .toEqual(
                 {
                     'property-name': {
@@ -126,7 +128,7 @@ function getSamplePatternWithMetadata(...metadataDefs): object {
 
 
 describe('instantiateAllMetadata', () => {
-    it('instantiate simple metadata list with two objects', () => {
+    it('instantiate simple metadata list with two objects', async () => {
         const pattern = getSamplePatternWithMetadata({
             'type': 'object',
             'properties': {
@@ -144,7 +146,8 @@ describe('instantiateAllMetadata', () => {
             }
         }
         );
-        expect(instantiateAllMetadata(pattern, mockSchemaDir, false, true))
+        const result = await instantiateAllMetadata(pattern, mockSchemaDir, false, true);
+        expect(result)
             .toEqual(
                 [
                     {

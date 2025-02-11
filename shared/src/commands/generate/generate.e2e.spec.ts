@@ -13,7 +13,8 @@ jest.mock('../../logger', () => {
             return {
                 info: () => {},
                 warn: () => {},
-                debug: () => {}
+                debug: () => {},
+                error: () => {}
             };
         }
     };
