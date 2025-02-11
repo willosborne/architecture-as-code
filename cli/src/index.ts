@@ -9,7 +9,6 @@ import { version } from '../package.json';
 import { initLogger } from '@finos/calm-shared/logger';
 import { startServer } from './server/cli-server';
 import { DocumentLoaderOptions } from '@finos/calm-shared/document-loader/document-loader';
-import { loadCliConfig } from './cli-config';
 
 const FORMAT_OPTION = '-f, --format <format>';
 const ARCHITECTURE_OPTION = '-a, --architecture <file>';
@@ -19,7 +18,6 @@ const PATTERN_OPTION = '-p, --pattern <file>';
 const SCHEMAS_OPTION = '-s, --schemaDirectory <path>';
 const STRICT_OPTION = '--strict';
 const VERBOSE_OPTION = '-v, --verbose';
-const CALMHUB_URL_OPTION = '-c, --calmHubUrl <url>';
 
 
 
@@ -34,13 +32,12 @@ program
     .requiredOption(PATTERN_OPTION, 'Path to the pattern file to use. May be a file path or a URL.')
     .requiredOption(OUTPUT_OPTION, 'Path location at which to output the generated file.', 'architecture.json')
     .option(SCHEMAS_OPTION, 'Path to the directory containing the meta schemas to use.')
-    .option(CALMHUB_URL_OPTION, 'URL to CALMHub instance')
     .option(VERBOSE_OPTION, 'Enable verbose logging.', false)
     .option(GENERATE_ALL_OPTION, 'Generate all properties, ignoring the "required" field.', false)
     .action(async (options) => {
-            const docLoaderOpts = await parseDocumentLoaderConfig(options);
-            await runGenerate(options.pattern, options.output, !!options.verbose, options.generateAll, docLoaderOpts)
-        }
+        const docLoaderOpts = await parseDocumentLoaderConfig(options);
+        await runGenerate(options.pattern, options.output, !!options.verbose, options.generateAll, docLoaderOpts);
+    }
     );
 
 program
@@ -108,32 +105,17 @@ async function parseDocumentLoaderConfig(options): Promise<DocumentLoaderOptions
     if (options.calmHubUrl && options.schemaDirectory) {
         program.error('At most one of --schemaDirectory and --calmHubUrl is supported; both were provided.');
     }
-    if (options.calmHubUrl) {
-        return {
-            loadMode: 'calmhub',
-            calmHubUrl: options.calmHubUrl
-        }
-    }
     if (options.schemaDirectory) {
         return {
             loadMode: 'filesystem',
             schemaDirectoryPath: options.schemaDirectory
-        }
+        };
     }
 
-    const userConfig = await loadCliConfig();
-    if (userConfig && userConfig.calmHubUrl) {
-        return {
-            loadMode: 'calmhub',
-            calmHubUrl: userConfig.calmHubUrl
-        }
-    }
-
-    console.log('Warning, no schema loading mechanism was defined. Only the bundled core schemas will be available; you may see empty definitions or errors.')
     return {
         loadMode: 'filesystem',
         schemaDirectoryPath: undefined
-    }
+    };
 }
 
 program.parse(process.argv);
