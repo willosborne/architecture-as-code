@@ -8,11 +8,8 @@ import {CALMArchitecture} from '../../types.js';
 import {SchemaDirectory} from '../../schema-directory.js';
 import {instantiateNodes} from './components/node.js';
 import {instantiateRelationships} from './components/relationship.js';
-import {CALM_META_SCHEMA_DIRECTORY} from '../../consts.js';
 import {instantiateAllMetadata} from './components/metadata.js';
-import { FileSystemDocumentLoader } from '@finos/calm-shared/document-loader/file-system-document-loader.js';
-import { DocumentLoader, DocumentLoaderOptions } from '@finos/calm-shared/document-loader/document-loader.js';
-import { CALMHubDocumentLoader } from '@finos/calm-shared/document-loader/calmhub-document-loader.js';
+import { buildDocumentLoader, DocumentLoaderOptions } from '../../document-loader/document-loader.js';
 
 let logger: winston.Logger; // defined later at startup
 
@@ -36,30 +33,13 @@ function loadFile(path: string): object {
     }
 }
 
-function getDocumentLoader(docLoaderOpts: DocumentLoaderOptions, debug: boolean): DocumentLoader {
-    switch(docLoaderOpts.loadMode) {
-        case 'filesystem': 
-            const directoryPaths = [CALM_META_SCHEMA_DIRECTORY];
-            if (docLoaderOpts.schemaDirectoryPath) {
-                directoryPaths.push(docLoaderOpts.schemaDirectoryPath);
-            }
-            return new FileSystemDocumentLoader(directoryPaths, debug);
-        case 'calmhub':
-            return new CALMHubDocumentLoader(docLoaderOpts.calmHubUrl, debug);
-    }
-}
-
 export async function generate(patternPath: string, debug: boolean, instantiateAll: boolean, docLoaderOpts: DocumentLoaderOptions): Promise<CALMArchitecture> {
     logger = initLogger(debug);
-    const documentLoader = getDocumentLoader(docLoaderOpts, debug);
+    const documentLoader = buildDocumentLoader(docLoaderOpts, debug);
     const schemaDirectory = new SchemaDirectory(documentLoader);
 
     try {
-
-        await schemaDirectory.loadSchemas(CALM_META_SCHEMA_DIRECTORY);
-        // if (schemaDirectoryPath) {
-        //     await schemaDirectory.loadSchemas(schemaDirectoryPath);
-        // }
+        await schemaDirectory.loadSchemas();
     }
     catch (err) {
         logger.error('Error while trying to load schemas: ' + err.message);

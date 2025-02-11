@@ -12,7 +12,7 @@ import { SpectralResult } from './spectral.result.js';
 import createJUnitReport from './output-formats/junit-output.js';
 import prettyFormat from './output-formats/pretty-output';
 import { SchemaDirectory } from '../../schema-directory.js';
-import { FileSystemDocumentLoader } from '@finos/calm-shared/document-loader/file-system-document-loader';
+import { FileSystemDocumentLoader } from '../../document-loader/file-system-document-loader';
 
 let logger: winston.Logger; // defined later at startup
 
@@ -82,10 +82,10 @@ async function loadMetaSchemas(metaSchemaLocation: string): Promise<SchemaDirect
     logger.info(`Loading meta schema(s) from ${metaSchemaLocation}`);
 
 
-    // TODO pass debug
+    // TODO rework to use global logger config
     const documentLoader = new FileSystemDocumentLoader([metaSchemaLocation], true);
     const schemaDirectory = new SchemaDirectory(documentLoader);
-    await schemaDirectory.loadSchemas(metaSchemaLocation);
+    await schemaDirectory.loadSchemas();
 
     return schemaDirectory;
 }
