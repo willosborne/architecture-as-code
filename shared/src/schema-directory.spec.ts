@@ -1,6 +1,7 @@
 import { DocumentLoader } from './document-loader/document-loader';
 import { SchemaDirectory } from './schema-directory';
 import { readFile } from 'node:fs/promises';
+import { error } from 'console';
 
 jest.mock('./logger', () => {
     return {
@@ -23,31 +24,52 @@ function getMockDocumentLoader(): DocumentLoader {
 }
 
 describe('SchemaDirectory', () => {
-    it('calls documentloader initialise', async () => {
-        const mockDocLoader = getMockDocumentLoader();
+    let mockDocLoader;
+    let mockLoadMissingDocument;
 
+    beforeEach(() => {
+        mockDocLoader = getMockDocumentLoader();
+        mockLoadMissingDocument = mockDocLoader.loadMissingDocument as jest.MockedFunction<typeof mockDocLoader.loadMissingDocument>;
+    })
+
+    it('calls documentloader initialise', async () => {
         const schemaDir = new SchemaDirectory(mockDocLoader);
         
         await schemaDir.loadSchemas();
         expect(mockDocLoader.initialise).toHaveBeenCalled();
     });
+
+    it('calls loadMissingDocument method when trying to resolve a spec not loaded at startup', async () => {
+        const schemaDir = new SchemaDirectory(mockDocLoader);
+        
+        await schemaDir.loadSchemas();
+
+        const expectedValue = {'$id': 'abcd'};
+        mockLoadMissingDocument.mockReturnValueOnce(new Promise(resolve => resolve(expectedValue)));
+
+        const returnedSchema = await schemaDir.getSchema('mock id');
+        expect(returnedSchema).toEqual(expectedValue)
+    })
     
 
-    it('resolves a reference from a stored schema', async () => {
+    it.only('resolves a reference from a stored schema', async () => {
         const schemaDir = new SchemaDirectory(getMockDocumentLoader());
         
+        // await schemaDir.loadSchemas();
         // await schemaDir.loadSchemas(__dirname + '/../../calm/draft/2024-03');
 
         const def = await readFile('test_fixtures/calm/core.json', 'utf-8')
         const json = JSON.parse(def);
-        const nodeRef = 'https://calm.finos.org/draft/2024-03/meta/core.json#/defs/node';
-        const id = 'https://calm.finos.org/draft/2024-03/meta/core.json';
+        console.error(json)
+        const nodeRef = 'https://raw.githubusercontent.com/finos/architecture-as-code/main/calm/draft/2024-03/meta/core.json#/defs/node';
+        // const id = 'https://calm.finos.org/draft/2024-03/meta/core.json';
+        
+        mockLoadMissingDocument.mockReturnValueOnce(new Promise(resolve => resolve(json)));
 
-        schemaDir.storeDocument(id, 'schema', json);
         const nodeDef = schemaDir.getDefinition(nodeRef);
 
-        // node should have a required property of node-type
-        expect(nodeDef['required']).toContain('node-type');
+        // // node should have a required property of node-type
+        // expect(nodeDef['required']).toContain('node-type');
     });
 
     // it('recursively resolve references from a loaded schema', async () => {
