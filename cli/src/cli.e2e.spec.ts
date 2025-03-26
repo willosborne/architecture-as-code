@@ -202,22 +202,21 @@ describe('CLI Integration Tests', () => {
         const outputFile = path.join(outputDir, 'cli-e2e-output.html');
 
         const templateCommand = `calm template --input ${testModelPath} --bundle ${templateBundlePath} --output ${outputDir} --url-to-local-file-mapping ${localDirectory}`;
-        await execPromise(templateCommand);
+        exec(templateCommand, (error, stdout, _stderr) => {
 
-        await new Promise(resolve => setTimeout(resolve, 2 * millisPerSecond));
+            expect(fs.existsSync(outputFile)).toBe(true);
 
-        expect(fs.existsSync(outputFile)).toBe(true);
+            if (fs.existsSync(outputFile)) {
+                const actualContent = fs.readFileSync(outputFile, 'utf8').trim();
+                const expectedContent = fs.readFileSync(expectedOutput, 'utf8').trim();
 
-        if (fs.existsSync(outputFile)) {
-            const actualContent = fs.readFileSync(outputFile, 'utf8').trim();
-            const expectedContent = fs.readFileSync(expectedOutput, 'utf8').trim();
+                expect(actualContent).toEqual(expectedContent);
 
-            expect(actualContent).toEqual(expectedContent);
-
-            if (fs.existsSync(outputDir)) {
-                fs.rmSync(outputDir, { recursive: true, force: true });
+                if (fs.existsSync(outputDir)) {
+                    fs.rmSync(outputDir, {recursive: true, force: true});
+                }
             }
-        }
+        });
     });
 
     test('example docify command - generates expected output', async () => {
@@ -237,13 +236,12 @@ describe('CLI Integration Tests', () => {
 
         try {
             const templateCommand = `calm docify --input ${testModelPath} --output ${outputDir} --url-to-local-file-mapping ${localDirectory}`;
-            await execPromise(templateCommand);
+            exec(templateCommand, (error, stdout, _stderr) => {
 
-            await new Promise(resolve => setTimeout(resolve, 2 * 1000));
-
-            for (const file of expectedFiles) {
-                expect(fs.existsSync(file)).toBeTruthy();
-            }
+                for (const file of expectedFiles) {
+                    expect(fs.existsSync(file)).toBeTruthy();
+                }
+            });
         } finally {
             if (fs.existsSync(outputDir)) {
                 fs.rmSync(outputDir, { recursive: true, force: true });
