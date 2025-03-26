@@ -87,7 +87,7 @@ describe('TemplateProcessor', () => {
     });
 
     it('should throw an error if the input file is missing', async () => {
-        let loggerErrorSpy = vi.spyOn(TemplateProcessor['logger'], 'error').mockImplementation(vi.fn());
+
         (fs.existsSync as vi.mock).mockImplementation((filePath: string) => {
             return !filePath.includes('simple-nodes.json');
         });

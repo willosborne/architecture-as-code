@@ -202,7 +202,7 @@ describe('CLI Integration Tests', () => {
         const outputFile = path.join(outputDir, 'cli-e2e-output.html');
 
         const templateCommand = `calm template --input ${testModelPath} --bundle ${templateBundlePath} --output ${outputDir} --url-to-local-file-mapping ${localDirectory}`;
-        exec(templateCommand, (error, stdout, _stderr) => {
+        exec(templateCommand, (_stderr) => {
 
             expect(fs.existsSync(outputFile)).toBe(true);
 
@@ -236,7 +236,7 @@ describe('CLI Integration Tests', () => {
 
         try {
             const templateCommand = `calm docify --input ${testModelPath} --output ${outputDir} --url-to-local-file-mapping ${localDirectory}`;
-            exec(templateCommand, (error, stdout, _stderr) => {
+            exec(templateCommand, (_stderr) => {
 
                 for (const file of expectedFiles) {
                     expect(fs.existsSync(file)).toBeTruthy();
