@@ -1,7 +1,8 @@
 import { CALM_META_SCHEMA_DIRECTORY } from '../consts';
-import { SchemaDirectory } from '../../../temp/schema-directory';
-import { CalmDocumentType } from '../types';
+import { SchemaDirectory } from '../schema-directory';
 import { FileSystemDocumentLoader } from './file-system-document-loader';
+
+export type CalmDocumentType = 'architecture' | 'pattern' | 'schema';
 
 export interface DocumentLoader {
     initialise(schemaDirectory: SchemaDirectory): Promise<void>;
