@@ -1,15 +1,8 @@
 package org.finos.calm.mcp.api.model.adr;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.owasp.html.PolicyFactory;
-import org.owasp.html.Sanitizers;
-
 import java.util.Objects;
 
 public final class Decision {
-
-    @JsonIgnore
-    private final PolicyFactory DECISION_POLICY = Sanitizers.FORMATTING.and(Sanitizers.BLOCKS).and(Sanitizers.TABLES);
     private Option chosenOption;
     private String rationale;
 
@@ -35,7 +28,7 @@ public final class Decision {
     }
 
     public void setRationale(String rationale) {
-        this.rationale = (rationale == null) ? null : DECISION_POLICY.sanitize(rationale);
+        this.rationale = rationale;
     }
 
     @Override

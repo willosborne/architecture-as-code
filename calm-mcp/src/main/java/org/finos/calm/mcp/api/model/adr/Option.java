@@ -1,16 +1,9 @@
 package org.finos.calm.mcp.api.model.adr;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.owasp.html.PolicyFactory;
-import org.owasp.html.Sanitizers;
-
 import java.util.List;
 import java.util.Objects;
 
 public final class Option {
-
-    @JsonIgnore
-    private final PolicyFactory OPTION_POLICY = Sanitizers.FORMATTING.and(Sanitizers.BLOCKS).and(Sanitizers.TABLES);
     private String name;
     private String description;
     private List<String> positiveConsequences;
@@ -44,21 +37,19 @@ public final class Option {
     }
 
     public void setName(String name) {
-        this.name = (name == null) ? null : OPTION_POLICY.sanitize(name);
+        this.name = name;
     }
 
     public void setDescription(String description) {
-        this.description = (description == null) ? null : OPTION_POLICY.sanitize(description);
+        this.description = description;
     }
 
     public void setPositiveConsequences(List<String> positiveConsequences) {
-        this.positiveConsequences =
-                (positiveConsequences == null) ? null : positiveConsequences.stream().map(OPTION_POLICY::sanitize).toList();
+        this.positiveConsequences = positiveConsequences;
     }
 
     public void setNegativeConsequences(List<String> negativeConsequences) {
-        this.negativeConsequences =
-                (negativeConsequences == null) ? null : negativeConsequences.stream().map(OPTION_POLICY::sanitize).toList();
+        this.negativeConsequences = negativeConsequences;
     }
 
     @Override

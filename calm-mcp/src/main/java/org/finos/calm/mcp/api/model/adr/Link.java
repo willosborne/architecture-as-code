@@ -1,16 +1,8 @@
 package org.finos.calm.mcp.api.model.adr;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.owasp.html.PolicyFactory;
-import org.owasp.html.Sanitizers;
-
 import java.util.Objects;
 
 public final class Link {
-
-    @JsonIgnore
-    private final PolicyFactory LINK_POLICY = Sanitizers.FORMATTING.and(Sanitizers.BLOCKS).and(Sanitizers.TABLES);
-
     private String rel;
     private String href;
 
@@ -32,11 +24,11 @@ public final class Link {
     }
 
     public void setRel(String rel) {
-        this.rel = (rel == null) ? null : LINK_POLICY.sanitize(rel);
+        this.rel = rel;
     }
 
     public void setHref(String href) {
-        this.href = (href == null) ? null : LINK_POLICY.sanitize(href);
+        this.href = href;
     }
 
     @Override

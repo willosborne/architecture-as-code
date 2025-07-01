@@ -1,10 +1,6 @@
 package org.finos.calm.mcp.api;
 
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 import org.finos.calm.mcp.api.model.AdrResponse;
@@ -26,4 +22,9 @@ public interface AdrClient {
     @Path("/calm/namespaces/{namespace}/adrs")
     @Consumes(MediaType.APPLICATION_JSON)
     RestResponse<Void> createAdr(@PathParam("namespace") String namespace, Adr adr);
+
+    @POST
+    @Path("/calm/namespaces/{namespace}/adrs/{id}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    RestResponse<Void> updateAdr(@PathParam("namespace") String namespace, @PathParam("id") String id, Adr adr);
 }

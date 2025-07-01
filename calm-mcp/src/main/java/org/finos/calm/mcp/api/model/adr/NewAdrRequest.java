@@ -1,16 +1,9 @@
 package org.finos.calm.mcp.api.model.adr;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.owasp.html.PolicyFactory;
-import org.owasp.html.Sanitizers;
-
 import java.util.List;
 import java.util.Objects;
 
 public final class NewAdrRequest {
-
-    @JsonIgnore
-    private final PolicyFactory NEW_ADR_REQUEST_POLICY = Sanitizers.FORMATTING.and(Sanitizers.BLOCKS).and(Sanitizers.TABLES);
     private String title;
     private String contextAndProblemStatement;
     private List<String> decisionDrivers;
@@ -63,17 +56,17 @@ public final class NewAdrRequest {
     }
 
     public void setTitle(String title) {
-        this.title = (title == null) ? null : NEW_ADR_REQUEST_POLICY.sanitize(title);
+        this.title = title;
     }
 
     public void setContextAndProblemStatement(String contextAndProblemStatement) {
         this.contextAndProblemStatement =
-                (contextAndProblemStatement == null) ? null : NEW_ADR_REQUEST_POLICY.sanitize(contextAndProblemStatement);
+                contextAndProblemStatement;
     }
 
     public void setDecisionDrivers(List<String> decisionDrivers) {
         this.decisionDrivers =
-                (decisionDrivers == null) ? null : decisionDrivers.stream().map(NEW_ADR_REQUEST_POLICY::sanitize).toList();
+                decisionDrivers;
 
     }
 
