@@ -1,12 +1,16 @@
 import axios, { Axios, AxiosResponse } from 'axios';
-import { CLIConfig } from "../cli-config";
+import { CLIConfig, loadAuthPlugin } from "../cli-config";
 import { CalmDocumentType } from '@finos/calm-shared/src/document-loader/document-loader';
 import * as calmHubUrls from './calm-hub-urls';
+import { AuthPlugin } from '@finos/calm-shared/src/auth/auth-plugin';
+import { NoAuthPlugin } from '@finos/calm-shared/src/auth/no-auth-plugin';
 
 export class CalmHubService {
     private readonly ax: Axios;
+    private readonly authPlugin: AuthPlugin;
 
-    constructor(calmHubUrl: string, axiosInstance?: Axios) {
+    constructor(calmHubUrl: string, authPlugin: AuthPlugin, axiosInstance?: Axios) {
+        this.authPlugin = authPlugin;
         if (axiosInstance) {
             this.ax = axiosInstance;
         }
@@ -21,11 +25,17 @@ export class CalmHubService {
         }
     }
 
-    static fromCliConfig(config: CLIConfig): CalmHubService {
+    static async fromCliConfig(config: CLIConfig, debug: boolean): Promise<CalmHubService> {
         if (!config.calmHubUrl) {
             throw new Error('No CalmHub instance configured. Please set --calm-hub-url or calmHubUrl in ~/.calm.json!')
         }
-        return new CalmHubService(config.calmHubUrl);
+        let authPlugin;
+        if (config.authPluginPath) {
+            authPlugin = await loadAuthPlugin(config.authPluginPath, debug);
+        } else {
+            authPlugin = new NoAuthPlugin(debug);
+        }
+        return new CalmHubService(config.calmHubUrl, authPlugin);
     }
 
     async getCalmHubResourceVersions(namespace: string, name: string): Promise<string[]> {

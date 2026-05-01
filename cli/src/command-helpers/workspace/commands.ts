@@ -2,7 +2,7 @@ import { Argument, Command } from 'commander';
 import path from 'path';
 import { readFile } from 'fs/promises';
 import { ensureWorkspaceBundle, getActiveWorkspace, listWorkspaces, setActiveWorkspace, cleanWorkspaceBundle, cleanAllWorkspaces } from './workspace';
-import { addFileToBundle, printBundleTree, BundleDocumentType } from './bundle';
+import { addFileToBundle, printBundleTree, BundleDocumentType, loadManifest } from './bundle';
 import { populateWorkspaceBundle } from './populate';
 import { createNewDocument } from './new';
 import { pushWorkspaceToHub } from './push';
@@ -171,7 +171,13 @@ export function setupWorkspaceCommands(program: Command) {
                     logger.info(activeWorkspace);
                 } else {
                     logger.info('No active workspace.');
+                    process.exit(0);
                 }
+                // TODO actually output info about current workspace.
+                const bundlePath = path.join(gitRoot, '.calm-workspace', 'bundles', activeWorkspace);
+                const bundleManifest = await loadManifest(bundlePath);
+                const activeManifestEntry = bundleManifest[activeWorkspace];
+                console.log(JSON.stringify(activeManifestEntry, null, 2));
             } catch (err) {
                 logger.error('Failed to get active workspace: ' + (err instanceof Error ? err.message : String(err)));
                 process.exit(1);
@@ -273,14 +279,13 @@ export function setupWorkspaceCommands(program: Command) {
                     process.exit(1);
                 }
 
+                // TODO use provided calm hub url
                 const config = await loadCliConfig();
-                const calmHubUrl = options.calmHubUrl ?? config?.calmHubUrl;
-                if (!calmHubUrl) {
+                if (!config || !config.calmHubUrl) {
                     logger.error('No CalmHub URL configured. Use --calm-hub-url or set calmHubUrl in ~/.calm.json');
                     process.exit(1);
                 }
-
-                const service = new CalmHubService(calmHubUrl);
+                const service = await CalmHubService.fromCliConfig(config, true)
                 await pushWorkspaceToHub(bundlePath, service);
             } catch (err) {
                 logger.error('Failed to push workspace: ' + (err instanceof Error ? err.message : String(err)));
