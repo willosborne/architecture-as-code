@@ -7,9 +7,9 @@ import { NoAuthPlugin } from '@finos/calm-shared/src/auth/no-auth-plugin';
 
 export class CalmHubService {
     private readonly ax: Axios;
-    private readonly authPlugin: AuthPlugin;
+    private readonly authPlugin?: AuthPlugin;
 
-    constructor(calmHubUrl: string, authPlugin: AuthPlugin, axiosInstance?: Axios) {
+    constructor(calmHubUrl: string, authPlugin?: AuthPlugin, axiosInstance?: Axios) {
         this.authPlugin = authPlugin;
         if (axiosInstance) {
             this.ax = axiosInstance;
@@ -21,6 +21,15 @@ export class CalmHubService {
                 headers: {
                     'Content-Type': 'application/json'
                 }
+            });
+        }
+
+        if (this.authPlugin) {
+            this.ax.interceptors.request.use(async (config) => {
+                const fullUrl = (config.baseURL || '') + (config.url || '');
+                const authHeaders = await this.authPlugin!.getAuthHeaders(fullUrl, config.data);
+                Object.assign(config.headers, authHeaders);
+                return config;
             });
         }
     }
