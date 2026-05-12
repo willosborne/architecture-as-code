@@ -273,6 +273,18 @@ export async function parseDocumentLoaderConfig(
         logger.info('Using CALMHub URL from config file: ' + userConfig.calmHubUrl);
         docLoaderOpts.calmHubUrl = userConfig.calmHubUrl;
     }
+    
+    // if we have an auth plugin and we have calmHub configured
+    if (userConfig && userConfig.authPluginPath) {
+        logger.info('Loading auth plugin from config file: ' + userConfig.authPluginPath);
+        try {
+            const authPlugin = await cliConfig.loadAuthPlugin(userConfig.authPluginPath, !!options.verbose);
+            docLoaderOpts.authPlugin = authPlugin;
+            logger.debug('Auth plugin loaded successfully');
+        } catch (err) {
+            logger.error('Failed to load auth plugin: ' + (err instanceof Error ? err.message : String(err)));
+        }
+    }
 
     // If a CALM workspace bundle is present in the repository, prefer it for resolving documents
     try {
