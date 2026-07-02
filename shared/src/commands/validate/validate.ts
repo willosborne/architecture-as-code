@@ -13,6 +13,8 @@ import prettyFormat from './output-formats/pretty-output.js';
 import { SchemaDirectory } from '../../schema-directory.js';
 import { JsonSchemaValidator } from './json-schema-validator.js';
 import { selectChoices, CalmChoice } from '../generate/components/options.js';
+import { validateAllControls } from './validate-controls.js';
+import { validateNodeDetails, ArchitectureValidator } from './validate-node-details.js';
 
 let logger: Logger; // defined later at startup
 
@@ -167,14 +169,14 @@ export async function validate(
  * @param debug - the flag to enable debug logging.
  * @returns the validation outcome with the results of the spectral and json schema validations.
  */
-async function validateArchitectureAgainstPattern(architecture: object, pattern: object, schemaDirectory: SchemaDirectory, debug: boolean): Promise<ValidationOutcome> {
+async function validateArchitectureAgainstPattern(architecture: object, pattern: object, schemaDirectory: SchemaDirectory, debug: boolean, visitedUrls: Set<string> = new Set<string>()): Promise<ValidationOutcome> {
     const spectralResultForPattern: SpectralResult = await runSpectralValidations(stripRefs(pattern), validationRulesForPattern, 'pattern');
     const spectralResultForArchitecture: SpectralResult = await runSpectralValidations(JSON.stringify(architecture), validationRulesForArchitecture, 'architecture');
 
     const spectralResult = mergeSpectralResults(spectralResultForPattern, spectralResultForArchitecture);
 
     let errors = spectralResult.errors;
-    const warnings = spectralResult.warnings;
+    let warnings = spectralResult.warnings;
 
     const patternResolved = applyArchitectureOptionsToPattern(architecture, pattern, debug);
 
@@ -199,7 +201,27 @@ async function validateArchitectureAgainstPattern(architecture: object, pattern:
         jsonSchemaValidations = convertJsonSchemaIssuesToValidationOutputs(schemaErrors, 'architecture');
     }
 
-    return new ValidationOutcome(jsonSchemaValidations, spectralResult.spectralIssues, errors, warnings);
+    const controlResult = await validateAllControls(architecture, pattern, schemaDirectory, debug);
+    if (controlResult.hasErrors) errors = true;
+    if (controlResult.hasWarnings) warnings = true;
+    jsonSchemaValidations = jsonSchemaValidations.concat(controlResult.jsonSchemaOutputs);
+
+    const nodeDetailsResult = await validateNodeDetails(
+        architecture,
+        schemaDirectory,
+        debug,
+        validateArchitectureDispatch,
+        visitedUrls
+    );
+    if (nodeDetailsResult.hasErrors) errors = true;
+    if (nodeDetailsResult.hasWarnings) warnings = true;
+
+    return new ValidationOutcome(
+        jsonSchemaValidations.concat(nodeDetailsResult.jsonSchemaOutputs),
+        spectralResult.spectralIssues.concat(nodeDetailsResult.spectralOutputs),
+        errors,
+        warnings
+    );
 }
 
 
@@ -248,7 +270,7 @@ async function validateArchitectureOnly(architecture: object, schemaDirectory: S
 
     let jsonSchemaValidations: ValidationOutput[] = [];
     let errors = spectralResultForArchitecture.errors;
-    const warnings = spectralResultForArchitecture.warnings;
+    let warnings = spectralResultForArchitecture.warnings;
 
     const coreSchemaUrl = schemaDirectory ? findLatestCalmCoreSchemaUrl(schemaDirectory) : undefined;
     const coreSchema = (schemaDirectory && coreSchemaUrl) ? await schemaDirectory.getSchema(coreSchemaUrl) : undefined;
@@ -275,9 +297,36 @@ async function validateArchitectureOnly(architecture: object, schemaDirectory: S
         }
     }
 
+    if (schemaDirectory) {
+        const controlResult = await validateAllControls(architecture, undefined, schemaDirectory, debug);
+        if (controlResult.hasErrors) errors = true;
+        if (controlResult.hasWarnings) warnings = true;
+        jsonSchemaValidations = jsonSchemaValidations.concat(controlResult.jsonSchemaOutputs);
+
+        const nodeDetailsResult = await validateNodeDetails(
+            architecture,
+            schemaDirectory,
+            debug,
+            validateArchitectureDispatch,
+            new Set<string>()
+        );
+        if (nodeDetailsResult.hasErrors) errors = true;
+        if (nodeDetailsResult.hasWarnings) warnings = true;
+        jsonSchemaValidations = jsonSchemaValidations.concat(nodeDetailsResult.jsonSchemaOutputs);
+        const spectralIssues = spectralResultForArchitecture.spectralIssues.concat(nodeDetailsResult.spectralOutputs);
+
+        logger.debug(`Returning validation outcome with ${jsonSchemaValidations.length} JSON schema validations, errors: ${errors}`);
+        return new ValidationOutcome(jsonSchemaValidations, spectralIssues, errors, warnings);
+    }
+
     logger.debug(`Returning validation outcome with ${jsonSchemaValidations.length} JSON schema validations, errors: ${errors}`);
     return new ValidationOutcome(jsonSchemaValidations, spectralResultForArchitecture.spectralIssues, errors, warnings);
 }
+
+const validateArchitectureDispatch: ArchitectureValidator = (arch, pat, dir, dbg, visited) =>
+    pat !== undefined
+        ? validateArchitectureAgainstPattern(arch, pat, dir, dbg, visited)
+        : validateArchitectureOnly(arch, dir, dbg);
 
 /**
  * Finds the URL of the most recent CALM core schema loaded in the schema directory.

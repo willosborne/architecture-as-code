@@ -1,0 +1,295 @@
+import { validateNodeDetails, ArchitectureValidator } from './validate-node-details';
+import { SchemaDirectory } from '../../schema-directory';
+import { ValidationOutput, ValidationOutcome } from './validation.output';
+
+vi.mock('../../logger.js', () => ({
+    initLogger: () => ({
+        info: vi.fn(),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+    })
+}));
+
+const subArchitecture = {
+    '$schema': 'https://example.com/pattern.json',
+    nodes: [{ 'unique-id': 'sub-node', 'node-type': 'service', name: 'Sub Node', description: 'Sub' }],
+    relationships: []
+};
+
+const patternDoc = { $id: 'https://example.com/pattern.json', type: 'object' };
+
+function makeSchemaDirectory(overrides: Partial<{
+    loadDocument: ReturnType<typeof vi.fn>,
+    getSchema: ReturnType<typeof vi.fn>,
+    fork: ReturnType<typeof vi.fn>,
+    loadSchemas: ReturnType<typeof vi.fn>,
+}> = {}): SchemaDirectory {
+    const freshDir = {
+        getSchema: vi.fn().mockResolvedValue(undefined),
+        loadDocument: vi.fn(),
+        fork: vi.fn(),
+        loadSchemas: vi.fn().mockResolvedValue(undefined),
+        storeDocument: vi.fn(),
+        getLoadedSchemas: vi.fn().mockReturnValue([]),
+    };
+    return {
+        getSchema: vi.fn().mockResolvedValue(patternDoc),
+        loadDocument: overrides.loadDocument ?? vi.fn().mockResolvedValue(subArchitecture),
+        fork: overrides.fork ?? vi.fn().mockReturnValue(freshDir),
+        loadSchemas: vi.fn().mockResolvedValue(undefined),
+        storeDocument: vi.fn(),
+        getLoadedSchemas: vi.fn().mockReturnValue([]),
+    } as unknown as SchemaDirectory;
+}
+
+function emptyOutcome(): ValidationOutcome {
+    return new ValidationOutcome([], [], false, false);
+}
+
+function errorOutcome(path: string): ValidationOutcome {
+    return new ValidationOutcome(
+        [new ValidationOutput('json-schema', 'error', 'sub-arch error', path, undefined)],
+        [],
+        true,
+        false
+    );
+}
+
+const noop: ArchitectureValidator = vi.fn().mockResolvedValue(emptyOutcome());
+
+describe('validateNodeDetails', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        (noop as ReturnType<typeof vi.fn>).mockResolvedValue(emptyOutcome());
+    });
+
+    it('returns empty outputs when architecture has no node details', async () => {
+        const arch = { nodes: [{ 'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D' }] };
+        const result = await validateNodeDetails(arch, makeSchemaDirectory(), false, noop, new Set());
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(result.hasErrors).toBe(false);
+        expect(noop).not.toHaveBeenCalled();
+    });
+
+    it('loads sub-architecture and calls recursiveValidator when node has detailed-architecture', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(schemaDir.loadDocument).toHaveBeenCalledWith('https://example.com/sub-arch.json', 'architecture');
+        expect(noop).toHaveBeenCalledOnce();
+        expect(result.hasErrors).toBe(false);
+    });
+
+    it('discovers pattern from $schema of sub-architecture when required-pattern is not set', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        // schemaDir.getSchema should have been called with the $schema URL from subArchitecture
+        expect(schemaDir.getSchema).toHaveBeenCalledWith('https://example.com/pattern.json');
+        expect(noop).toHaveBeenCalledWith(
+            subArchitecture,
+            patternDoc,
+            expect.anything(),  // fresh schema dir
+            false,
+            expect.any(Set)
+        );
+    });
+
+    it('uses required-pattern when it is set on the node details', async () => {
+        const explicitPatternUrl = 'https://example.com/explicit-pattern.json';
+        const explicitPattern = { $id: explicitPatternUrl, type: 'object' };
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: {
+                    'detailed-architecture': 'https://example.com/sub-arch.json',
+                    'required-pattern': explicitPatternUrl
+                }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockResolvedValue(explicitPattern);
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(noop).toHaveBeenCalledWith(
+            subArchitecture,
+            explicitPattern,
+            expect.anything(),
+            false,
+            expect.any(Set)
+        );
+    });
+
+    it('emits error at correct path when sub-architecture cannot be loaded', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/missing-sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory({
+            loadDocument: vi.fn().mockRejectedValue(new Error('not found'))
+        });
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs).toHaveLength(1);
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/details/detailed-architecture');
+        expect(result.jsonSchemaOutputs[0].message).toContain('not found');
+        expect(noop).not.toHaveBeenCalled();
+    });
+
+    it('prefixes sub-architecture errors with node path', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (noop as ReturnType<typeof vi.fn>).mockResolvedValue(errorOutcome('/nodes/0'));
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs).toHaveLength(1);
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/details/detailed-architecture/nodes/0');
+    });
+
+    it('prefixes root path "/" from sub-architecture as just the node path prefix', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (noop as ReturnType<typeof vi.fn>).mockResolvedValue(errorOutcome('/'));
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/details/detailed-architecture');
+    });
+
+    it('skips already-visited architecture URL (cycle detection)', async () => {
+        const archUrl = 'https://example.com/sub-arch.json';
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': archUrl }
+            }]
+        };
+        const visited = new Set([archUrl]);
+        const schemaDir = makeSchemaDirectory();
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, visited);
+        expect(noop).not.toHaveBeenCalled();
+        expect(result.hasErrors).toBe(false);
+        expect(schemaDir.loadDocument).not.toHaveBeenCalled();
+    });
+
+    it('validates both nodes when two nodes have detailed-architecture', async () => {
+        const arch = {
+            nodes: [
+                {
+                    'unique-id': 'n1',
+                    'node-type': 'service',
+                    name: 'N1',
+                    description: 'D',
+                    details: { 'detailed-architecture': 'https://example.com/sub-arch-1.json' }
+                },
+                {
+                    'unique-id': 'n2',
+                    'node-type': 'service',
+                    name: 'N2',
+                    description: 'D',
+                    details: { 'detailed-architecture': 'https://example.com/sub-arch-2.json' }
+                }
+            ]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (noop as ReturnType<typeof vi.fn>)
+            .mockResolvedValueOnce(errorOutcome('/x'))
+            .mockResolvedValueOnce(errorOutcome('/y'));
+
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(noop).toHaveBeenCalledTimes(2);
+        expect(result.jsonSchemaOutputs).toHaveLength(2);
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/details/detailed-architecture/x');
+        expect(result.jsonSchemaOutputs[1].path).toBe('/nodes/1/details/detailed-architecture/y');
+    });
+
+    it('propagates hasWarnings from sub-architecture outcome', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        const warningOutcome = new ValidationOutcome([], [], false, true);
+        (noop as ReturnType<typeof vi.fn>).mockResolvedValue(warningOutcome);
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasWarnings).toBe(true);
+        expect(result.hasErrors).toBe(false);
+    });
+
+    it('uses a fresh schema directory (fork) for each sub-architecture', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1',
+                'node-type': 'service',
+                name: 'N',
+                description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const freshDir = {
+            getSchema: vi.fn().mockResolvedValue(undefined),
+            loadDocument: vi.fn(),
+            fork: vi.fn(),
+            loadSchemas: vi.fn().mockResolvedValue(undefined),
+            storeDocument: vi.fn(),
+        };
+        const schemaDir = makeSchemaDirectory({ fork: vi.fn().mockReturnValue(freshDir) });
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(schemaDir.fork).toHaveBeenCalledOnce();
+        expect(freshDir.loadSchemas).toHaveBeenCalledOnce();
+        // recursiveValidator should have received the fresh dir
+        expect(noop).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.anything(),
+            freshDir,
+            false,
+            expect.any(Set)
+        );
+    });
+});

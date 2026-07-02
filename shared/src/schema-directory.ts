@@ -11,15 +11,17 @@ export class SchemaDirectory {
     private readonly schemas: Map<string, object> = new Map<string, object>();
     private readonly schemaTypes: Map<string, CalmDocumentType> = new Map<string, CalmDocumentType>();
     private readonly logger: Logger;
+    private readonly debug: boolean;
     private readonly PATTERN_CURRENTLY_VALIDATING = 'patternCurrentlyValidating';
     private documentLoader: DocumentLoader;
 
     /**
      * Initialise the SchemaDirectory. Does not load the schemas until loadSchemas is called.
-     * @param directoryPath The directory path from which to load schemas. All JSON and YAML files under this path will be loaded, including subfolders.
+     * @param documentLoader The document loader to use for loading documents.
      * @param debug Whether to log at debug level.
      */
     constructor(documentLoader: DocumentLoader, debug: boolean = false) {
+        this.debug = debug;
         this.logger = initLogger(debug, 'schema-directory');
         this.documentLoader = documentLoader;
     }
@@ -169,5 +171,22 @@ export class SchemaDirectory {
         this.logger.debug(`Storing document with ID ${documentId} of type ${documentType}.`);
         this.schemas.set(documentId, document);
         this.schemaTypes.set(documentId, documentType);
+    }
+
+    /**
+     * Load a CALM document (architecture or pattern) by reference via the DocumentLoader.
+     * Unlike getSchema(), this does not cache the result and accepts an explicit document type.
+     */
+    public async loadDocument(documentId: string, type: CalmDocumentType): Promise<object> {
+        return this.documentLoader.loadMissingDocument(documentId, type);
+    }
+
+    /**
+     * Return a new empty SchemaDirectory backed by the same DocumentLoader.
+     * The caller must call await forked.loadSchemas() before use.
+     * Isolation prevents schema-ID collisions between parent and sub-architecture AJV compilations.
+     */
+    public fork(): SchemaDirectory {
+        return new SchemaDirectory(this.documentLoader, this.debug);
     }
 }
