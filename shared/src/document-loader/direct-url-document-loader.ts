@@ -155,6 +155,13 @@ export class DirectUrlDocumentLoader implements DocumentLoader {
                     recoverable: false
                 });
             }
+            if (parsedUrl.search) {
+                throw new DocumentLoadError({
+                    name: 'UNKNOWN',
+                    message: `Direct URL loading does not support a query string: ${documentId}`,
+                    recoverable: false
+                });
+            }
             const requestPath = toRequestPath(parsedUrl);
             const baseURL = `${parsedUrl.protocol}//${normalizedHost}${parsedUrl.port ? `:${parsedUrl.port}` : ''}`;
             const response = await this.ax.get(requestPath, {

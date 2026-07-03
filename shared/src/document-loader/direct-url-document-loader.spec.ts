@@ -186,14 +186,9 @@ describe('direct-url-document-loader', () => {
             .rejects.toThrow('disallowed characters');
     });
 
-    it('does not forward the query string to the request', async () => {
+    it('rejects URLs that include a query string', async () => {
         const url = 'https://calm.finos.org/calm/schemas/2025-03/meta/core.json?evil=1';
-        const document = await directUrlDocumentLoader.loadMissingDocument(url, 'schema');
-        expect(document).toEqual({
-            '$id': 'https://calm.finos.org/calm/schemas/2025-03/meta/core.json',
-            'value': 'test'
-        });
-        const lastRequest = mock.history.get[mock.history.get.length - 1];
-        expect(lastRequest.url).toBe('/calm/schemas/2025-03/meta/core.json');
+        await expect(directUrlDocumentLoader.loadMissingDocument(url, 'schema'))
+            .rejects.toThrow('query string');
     });
 });
