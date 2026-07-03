@@ -12,6 +12,7 @@ import { NamespaceCounts, DomainControlCount } from '../../../model/counts.js';
 import { colors } from '../../../theme/colors.js';
 import { redesignTokens } from '../../../theme/redesign-tokens.js';
 import { CountBadge } from '../explore-rail/CountBadge.js';
+import { COUNT_FIELD, type NamespaceResourceType } from '../namespace-page/resource-type-meta.js';
 import {
     type TypeInUI,
     mapTypeInUIToTypeInUrl,
@@ -92,6 +93,18 @@ export function MobileNavMenu({ namespaceCounts, domainCounts, onClose }: Mobile
     const domainControlCount = useCallback(
         (d: string) => domainCounts.find((c) => c.domain === d)?.controlCount,
         [domainCounts]
+    );
+    // Per-type count for a namespace's resource-type drill-down level, mirroring
+    // the desktop namespace page's segmented type tabs. Uses the shared COUNT_FIELD
+    // map so a new browse type is wired in one place (Controls has no count field).
+    const typeCount = useCallback(
+        (namespace: string, type: TypeInUI): number | undefined => {
+            const c = namespaceCounts.find((nc) => nc.namespace === namespace);
+            if (!c) return undefined;
+            const field = COUNT_FIELD[type as NamespaceResourceType];
+            return field ? (c[field] as number) : undefined;
+        },
+        [namespaceCounts]
     );
 
     const openType = useCallback(
@@ -213,6 +226,8 @@ export function MobileNavMenu({ namespaceCounts, domainCounts, onClose }: Mobile
         isLeaf: boolean;
         onClick: () => void;
         count?: number;
+        /** Dim a zero count (empty, not broken) — mirrors the desktop type tabs. */
+        dimmed?: boolean;
         active?: boolean;
     }
 
@@ -233,12 +248,17 @@ export function MobileNavMenu({ namespaceCounts, domainCounts, onClose }: Mobile
                     onClick: () => setView({ level: 'types', namespace: ns }),
                 }));
             case 'types':
-                return RESOURCE_TYPES.map((t) => ({
-                    key: t,
-                    label: t,
-                    isLeaf: false,
-                    onClick: () => openType(view.namespace, t),
-                }));
+                return RESOURCE_TYPES.map((t) => {
+                    const count = typeCount(view.namespace, t);
+                    return {
+                        key: t,
+                        label: t,
+                        isLeaf: false,
+                        count,
+                        dimmed: count === 0,
+                        onClick: () => openType(view.namespace, t),
+                    };
+                });
             case 'resources':
                 return leafItems.map((item) => ({
                     key: item.id,
@@ -318,7 +338,9 @@ export function MobileNavMenu({ namespaceCounts, domainCounts, onClose }: Mobile
                                     >
                                         {row.label}
                                     </span>
-                                    {row.count !== undefined && <CountBadge count={row.count} active={row.active} />}
+                                    {row.count !== undefined && (
+                                        <CountBadge count={row.count} active={row.active} dimmed={row.dimmed} />
+                                    )}
                                     {!row.isLeaf && (
                                         <IoChevronForwardOutline className="text-base-content/40 shrink-0" size={18} />
                                     )}
