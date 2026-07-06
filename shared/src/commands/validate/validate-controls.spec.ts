@@ -313,4 +313,141 @@ describe('validateAllControls', () => {
         expect(result.hasErrors).toBe(true);
         expect(result.jsonSchemaOutputs[0].message).toContain('network error');
     });
+
+    it('returns no outputs when architecture cannot be parsed as CalmCore', async () => {
+        const result = await validateAllControls(null as unknown as object, undefined, makeSchemaDirectory(), false);
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(result.hasErrors).toBe(false);
+        expect(result.hasWarnings).toBe(false);
+        expect(mocks.jsonSchemaValidatorConstructor).not.toHaveBeenCalled();
+    });
+
+    it('skips validation when in-pattern JSON pointer resolves to an undefined schema', async () => {
+        const pattern = { defs: { myRequirement: undefined } };
+        const arch = architectureWithNodeControl(inlineConfig, '#/defs/myRequirement');
+        const result = await validateAllControls(arch, pattern, makeSchemaDirectory(), false);
+        expect(result.hasErrors).toBe(false);
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(mocks.jsonSchemaValidatorConstructor).not.toHaveBeenCalled();
+    });
+
+    it('emits error when config-url document fails to load', async () => {
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>)
+            .mockResolvedValueOnce(requirementSchema)                 // requirement schema
+            .mockRejectedValueOnce(new Error('config fetch failed')); // config-url
+        const arch = {
+            nodes: [{
+                'unique-id': 'node-1', 'node-type': 'service', name: 'N', description: 'D',
+                controls: {
+                    security: {
+                        description: 'Security',
+                        requirements: [{
+                            'requirement-url': 'https://example.com/requirement.json',
+                            'config-url': 'https://example.com/config.json'
+                        }]
+                    }
+                }
+            }]
+        };
+        const result = await validateAllControls(arch, undefined, schemaDir, false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('config fetch failed');
+        expect(mocks.jsonSchemaValidatorConstructor).not.toHaveBeenCalled();
+    });
+
+    it('skips validation when config-url document is not found', async () => {
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>)
+            .mockResolvedValueOnce(requirementSchema)  // requirement schema
+            .mockResolvedValueOnce(undefined);         // config-url -> not found
+        const arch = {
+            nodes: [{
+                'unique-id': 'node-1', 'node-type': 'service', name: 'N', description: 'D',
+                controls: {
+                    security: {
+                        description: 'Security',
+                        requirements: [{
+                            'requirement-url': 'https://example.com/requirement.json',
+                            'config-url': 'https://example.com/missing-config.json'
+                        }]
+                    }
+                }
+            }]
+        };
+        const result = await validateAllControls(arch, undefined, schemaDir, false);
+        expect(result.hasErrors).toBe(false);
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(mocks.jsonSchemaValidatorConstructor).not.toHaveBeenCalled();
+    });
+
+    it('emits error when the requirement schema cannot be compiled', async () => {
+        mocks.jsonSchemaValidatorConstructor.mockImplementationOnce(function () {
+            return {
+                validate: mocks.jsonSchemaValidate,
+                initialize: vi.fn().mockRejectedValue(new Error('invalid schema'))
+            };
+        });
+        const arch = architectureWithNodeControl(inlineConfig);
+        const result = await validateAllControls(arch, undefined, makeSchemaDirectory(), false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('Could not compile');
+        expect(result.jsonSchemaOutputs[0].message).toContain('invalid schema');
+    });
+
+    it('ignores relationships and flows that have no controls', async () => {
+        const arch = {
+            nodes: [{ 'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D' }],
+            relationships: [{
+                'unique-id': 'rel-1',
+                'relationship-type': { connects: { source: { node: 'a' }, destination: { node: 'b' } } }
+            }],
+            flows: [{ 'unique-id': 'flow-1', name: 'Flow', description: 'A flow', transitions: [] }]
+        };
+        const result = await validateAllControls(arch, undefined, makeSchemaDirectory(), false);
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(result.hasErrors).toBe(false);
+    });
+
+    it('handles validation errors with missing instancePath and message', async () => {
+        mocks.jsonSchemaValidate.mockReturnValue([{
+            schemaPath: '#/required',
+            keyword: 'required',
+            params: {}
+        }]);
+        const arch = architectureWithNodeControl(inlineConfig);
+        const result = await validateAllControls(arch, undefined, makeSchemaDirectory(), false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/controls/security/requirements/0');
+        expect(result.jsonSchemaOutputs[0].message).toBe('');
+    });
+
+    it('stringifies a non-Error string thrown while loading the requirement schema', async () => {
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockRejectedValueOnce('plain string failure');
+        const arch = architectureWithNodeControl(inlineConfig);
+        const result = await validateAllControls(arch, undefined, schemaDir, false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('plain string failure');
+    });
+
+    it('stringifies a non-Error object thrown while loading the requirement schema', async () => {
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockRejectedValueOnce({ code: 500 });
+        const arch = architectureWithNodeControl(inlineConfig);
+        const result = await validateAllControls(arch, undefined, schemaDir, false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('{"code":500}');
+    });
+
+    it('falls back to Unknown error when a thrown value cannot be stringified', async () => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockRejectedValueOnce(circular);
+        const arch = architectureWithNodeControl(inlineConfig);
+        const result = await validateAllControls(arch, undefined, schemaDir, false);
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('Unknown error');
+    });
 });

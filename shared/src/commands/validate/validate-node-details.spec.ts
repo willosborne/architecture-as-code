@@ -262,6 +262,118 @@ describe('validateNodeDetails', () => {
         expect(result.hasErrors).toBe(false);
     });
 
+    it('returns empty outputs when architecture cannot be parsed as CalmCore', async () => {
+        const result = await validateNodeDetails(null as unknown as object, makeSchemaDirectory(), false, noop, new Set());
+        expect(result.jsonSchemaOutputs).toHaveLength(0);
+        expect(result.hasErrors).toBe(false);
+        expect(noop).not.toHaveBeenCalled();
+    });
+
+    it('emits error at node path when recursiveValidator throws', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (noop as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('validator exploded'));
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs).toHaveLength(1);
+        expect(result.jsonSchemaOutputs[0].path).toBe('/nodes/0/details/detailed-architecture');
+        expect(result.jsonSchemaOutputs[0].message).toContain('validator exploded');
+    });
+
+    it('validates with undefined pattern when sub-architecture has no $schema and no required-pattern', async () => {
+        const subArchNoSchema = {
+            nodes: [{ 'unique-id': 'sub-node', 'node-type': 'service', name: 'Sub', description: 'Sub' }],
+            relationships: []
+        };
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockResolvedValue(subArchNoSchema) });
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(schemaDir.getSchema).not.toHaveBeenCalled();
+        expect(noop).toHaveBeenCalledWith(subArchNoSchema, undefined, expect.anything(), false, expect.any(Set));
+    });
+
+    it('falls back to $schema when required-pattern cannot be resolved', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: {
+                    'detailed-architecture': 'https://example.com/sub-arch.json',
+                    'required-pattern': 'https://example.com/explicit-pattern.json'
+                }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>)
+            .mockResolvedValueOnce(undefined)  // required-pattern -> not found
+            .mockResolvedValue(patternDoc);    // $schema fallback
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(noop).toHaveBeenCalledWith(subArchitecture, patternDoc, expect.anything(), false, expect.any(Set));
+    });
+
+    it('validates with undefined pattern when $schema lookup throws', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory();
+        (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('schema lookup failed'));
+        await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(noop).toHaveBeenCalledWith(subArchitecture, undefined, expect.anything(), false, expect.any(Set));
+    });
+
+    it('stringifies a non-Error string thrown while loading the sub-architecture', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockRejectedValue('string load failure') });
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('string load failure');
+    });
+
+    it('stringifies a non-Error object thrown while loading the sub-architecture', async () => {
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockRejectedValue({ status: 404 }) });
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('{"status":404}');
+    });
+
+    it('falls back to Unknown error when a thrown value cannot be stringified', async () => {
+        const circular: Record<string, unknown> = {};
+        circular.self = circular;
+        const arch = {
+            nodes: [{
+                'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
+                details: { 'detailed-architecture': 'https://example.com/sub-arch.json' }
+            }]
+        };
+        const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockRejectedValue(circular) });
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
+        expect(result.hasErrors).toBe(true);
+        expect(result.jsonSchemaOutputs[0].message).toContain('Unknown error');
+    });
+
     it('uses a fresh schema directory (fork) for each sub-architecture', async () => {
         const arch = {
             nodes: [{
