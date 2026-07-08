@@ -346,7 +346,7 @@ describe('validateNodeDetails', () => {
         expect(result.jsonSchemaOutputs[0].message).toContain('string load failure');
     });
 
-    it('stringifies a non-Error object thrown while loading the sub-architecture', async () => {
+    it('coerces a non-Error object thrown while loading the sub-architecture', async () => {
         const arch = {
             nodes: [{
                 'unique-id': 'n1', 'node-type': 'service', name: 'N', description: 'D',
@@ -356,10 +356,10 @@ describe('validateNodeDetails', () => {
         const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockRejectedValue({ status: 404 }) });
         const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
         expect(result.hasErrors).toBe(true);
-        expect(result.jsonSchemaOutputs[0].message).toContain('{"status":404}');
+        expect(result.jsonSchemaOutputs[0].message).toContain('[object Object]');
     });
 
-    it('falls back to Unknown error when a thrown value cannot be stringified', async () => {
+    it('coerces a circular object thrown while loading the sub-architecture without throwing', async () => {
         const circular: Record<string, unknown> = {};
         circular.self = circular;
         const arch = {
@@ -371,7 +371,7 @@ describe('validateNodeDetails', () => {
         const schemaDir = makeSchemaDirectory({ loadDocument: vi.fn().mockRejectedValue(circular) });
         const result = await validateNodeDetails(arch, schemaDir, false, noop, new Set());
         expect(result.hasErrors).toBe(true);
-        expect(result.jsonSchemaOutputs[0].message).toContain('Unknown error');
+        expect(result.jsonSchemaOutputs[0].message).toContain('[object Object]');
     });
 
     it('uses a fresh schema directory (fork) for each sub-architecture', async () => {

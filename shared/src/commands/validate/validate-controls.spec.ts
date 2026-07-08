@@ -431,16 +431,16 @@ describe('validateAllControls', () => {
         expect(result.jsonSchemaOutputs[0].message).toContain('plain string failure');
     });
 
-    it('stringifies a non-Error object thrown while loading the requirement schema', async () => {
+    it('coerces a non-Error object thrown while loading the requirement schema', async () => {
         const schemaDir = makeSchemaDirectory();
         (schemaDir.getSchema as ReturnType<typeof vi.fn>).mockRejectedValueOnce({ code: 500 });
         const arch = architectureWithNodeControl(inlineConfig);
         const result = await validateAllControls(arch, undefined, schemaDir, false);
         expect(result.hasErrors).toBe(true);
-        expect(result.jsonSchemaOutputs[0].message).toContain('{"code":500}');
+        expect(result.jsonSchemaOutputs[0].message).toContain('[object Object]');
     });
 
-    it('falls back to Unknown error when a thrown value cannot be stringified', async () => {
+    it('coerces a circular object thrown while loading the requirement schema without throwing', async () => {
         const circular: Record<string, unknown> = {};
         circular.self = circular;
         const schemaDir = makeSchemaDirectory();
@@ -448,6 +448,6 @@ describe('validateAllControls', () => {
         const arch = architectureWithNodeControl(inlineConfig);
         const result = await validateAllControls(arch, undefined, schemaDir, false);
         expect(result.hasErrors).toBe(true);
-        expect(result.jsonSchemaOutputs[0].message).toContain('Unknown error');
+        expect(result.jsonSchemaOutputs[0].message).toContain('[object Object]');
     });
 });

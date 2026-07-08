@@ -6,6 +6,7 @@ import { SchemaDirectory } from '../../schema-directory.js';
 import { JsonSchemaValidator } from './json-schema-validator.js';
 import { ValidationOutput } from './validation.output.js';
 import { initLogger, Logger } from '../../logger.js';
+import { getErrorMessage } from '../../error-utils.js';
 
 type ControlDetailResult = { outputs: ValidationOutput[], hasErrors: boolean };
 
@@ -138,7 +139,7 @@ async function loadSchemaFromDirectory(
     try {
         schema = await schemaDirectory.getSchema(requirementUrl);
     } catch (err) {
-        return { error: controlError(controlPath, `Could not load requirement schema from '${requirementUrl}': ${toErrorMessage(err)}`) };
+        return { error: controlError(controlPath, `Could not load requirement schema from '${requirementUrl}': ${getErrorMessage(err)}`) };
     }
     if (!schema) {
         return { error: controlError(controlPath, `Requirement schema not found: '${requirementUrl}'`) };
@@ -180,7 +181,7 @@ async function loadConfigFromUrl(
     try {
         loaded = await schemaDirectory.getSchema(configUrl);
     } catch (err) {
-        return { error: controlError(controlPath, `Could not load config from '${configUrl}': ${toErrorMessage(err)}`) };
+        return { error: controlError(controlPath, `Could not load config from '${configUrl}': ${getErrorMessage(err)}`) };
     }
     if (!loaded) {
         logger.debug(`Config document not found at '${configUrl}', skipping validation`);
@@ -202,7 +203,7 @@ async function runSchemaValidation(
         validator = new JsonSchemaValidator(schemaDirectory, requirementSchema, debug);
         await validator.initialize();
     } catch (err) {
-        return fail(controlError(controlPath, `Could not compile requirement schema from '${requirementUrl}': ${toErrorMessage(err)}`));
+        return fail(controlError(controlPath, `Could not compile requirement schema from '${requirementUrl}': ${getErrorMessage(err)}`));
     }
     const errors = validator.validate(config);
     return { outputs: controlErrorsToValidationOutputs(errors, controlPath), hasErrors: errors.length > 0 };
@@ -303,10 +304,4 @@ function nothing(): ControlDetailResult {
 
 function fail(output: ValidationOutput): ControlDetailResult {
     return { outputs: [output], hasErrors: true };
-}
-
-function toErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    if (typeof error === 'string') return error;
-    try { return JSON.stringify(error); } catch { return 'Unknown error'; }
 }

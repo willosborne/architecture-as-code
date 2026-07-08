@@ -15,6 +15,7 @@ import { JsonSchemaValidator } from './json-schema-validator.js';
 import { selectChoices, CalmChoice } from '../generate/components/options.js';
 import { validateAllControls } from './validate-controls.js';
 import { validateNodeDetails, ArchitectureValidator } from './validate-node-details.js';
+import { getErrorMessage } from '../../error-utils.js';
 
 let logger: Logger; // defined later at startup
 
@@ -186,7 +187,7 @@ async function validateArchitectureAgainstPattern(architecture: object, pattern:
         jsonSchemaValidator = new JsonSchemaValidator(schemaDirectory, patternResolved, debug);
         await jsonSchemaValidator.initialize();
     } catch (error) {
-        const errorMessage = toErrorMessage(error);
+        const errorMessage = getErrorMessage(error);
         logger.error(`JSON Schema compilation failed: ${errorMessage}`);
         jsonSchemaValidations = [
             new ValidationOutput('json-schema', 'error', errorMessage, '/', undefined, undefined, undefined, undefined, undefined, 'pattern')
@@ -248,7 +249,7 @@ async function validatePatternOnly(pattern: object, schemaDirectory: SchemaDirec
         await jsonSchemaValidator.initialize();
     } catch (error) {
         errors = true;
-        jsonSchemaErrors.push(new ValidationOutput('json-schema', 'error', toErrorMessage(error), '/', undefined, undefined, undefined, undefined, undefined, 'pattern'));
+        jsonSchemaErrors.push(new ValidationOutput('json-schema', 'error', getErrorMessage(error), '/', undefined, undefined, undefined, undefined, undefined, 'pattern'));
     }
 
     return new ValidationOutcome(jsonSchemaErrors, spectralValidationResults.spectralIssues, errors, warnings);// added spectral to return object
@@ -288,7 +289,7 @@ async function validateArchitectureOnly(architecture: object, schemaDirectory: S
                 jsonSchemaValidations = convertJsonSchemaIssuesToValidationOutputs(schemaErrors, 'architecture');
             }
         } catch (error) {
-            const errorMessage = toErrorMessage(error);
+            const errorMessage = getErrorMessage(error);
             logger.error(`JSON Schema compilation failed: ${errorMessage}`);
             jsonSchemaValidations = [
                 new ValidationOutput('json-schema', 'error', errorMessage, '/', undefined, undefined, undefined, undefined, undefined, 'architecture')
@@ -439,20 +440,6 @@ function getRuleNamesFromRuleset(ruleset: RulesetDefinition): string[] {
 
 function prettifyJson(json: unknown) {
     return JSON.stringify(json, null, 4);
-}
-
-function toErrorMessage(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    if (typeof error === 'string') {
-        return error;
-    }
-    try {
-        return JSON.stringify(error);
-    } catch {
-        return 'Unknown error';
-    }
 }
 
 export function stripRefs(obj: object): string {

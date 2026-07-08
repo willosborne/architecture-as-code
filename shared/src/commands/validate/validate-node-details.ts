@@ -3,6 +3,7 @@ import { CalmCoreSchema } from '@finos/calm-models/types';
 import { SchemaDirectory } from '../../schema-directory.js';
 import { ValidationOutput, ValidationOutcome } from './validation.output.js';
 import { initLogger, Logger } from '../../logger.js';
+import { getErrorMessage } from '../../error-utils.js';
 
 type CalmNode = CalmCore['nodes'][number];
 
@@ -120,7 +121,7 @@ async function loadSubArchitecture(
     try {
         return { subArch: await schemaDirectory.loadDocument(archUrl, 'architecture') };
     } catch (err) {
-        return { error: nodeDetailsError(detailsPrefix, `Could not load detailed-architecture '${archUrl}': ${toErrorMessage(err)}`) };
+        return { error: nodeDetailsError(detailsPrefix, `Could not load detailed-architecture '${archUrl}': ${getErrorMessage(err)}`) };
     }
 }
 
@@ -154,7 +155,7 @@ async function tryLoadSchema(
         if (!schema) logger.debug(`Pattern from ${label} '${url}' not found in schema directory`);
         return schema;
     } catch (err) {
-        logger.debug(`Could not load pattern from ${label} '${url}': ${toErrorMessage(err)}`);
+        logger.debug(`Could not load pattern from ${label} '${url}': ${getErrorMessage(err)}`);
         return undefined;
     }
 }
@@ -172,7 +173,7 @@ async function runRecursiveValidator(
     try {
         return { outcome: await recursiveValidator(subArch, pattern, freshDir, debug, visitedUrls) };
     } catch (err) {
-        return { error: nodeDetailsError(detailsPrefix, `Validation of detailed-architecture '${archUrl}' failed: ${toErrorMessage(err)}`) };
+        return { error: nodeDetailsError(detailsPrefix, `Validation of detailed-architecture '${archUrl}' failed: ${getErrorMessage(err)}`) };
     }
 }
 
@@ -220,10 +221,4 @@ function nodeDetailsError(path: string, message: string): ValidationOutput {
         undefined, undefined, undefined, undefined, undefined,
         'architecture'
     );
-}
-
-function toErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message;
-    if (typeof error === 'string') return error;
-    try { return JSON.stringify(error); } catch { return 'Unknown error'; }
 }
