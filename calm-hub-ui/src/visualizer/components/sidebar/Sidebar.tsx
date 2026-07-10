@@ -34,7 +34,7 @@ export function Sidebar({ selectedData, closeSidebar }: SidebarProps) {
                                 role="tab"
                                 aria-label="Details"
                                 onClick={() => setActiveTab('details')}
-                                className={`p-1.5 rounded-md transition-colors ${activeTab === 'details' ? 'bg-accent text-white' : 'text-base-content/50 hover:text-base-content'}`}
+                                className={`p-1.5 rounded-md transition-colors ${activeTab === 'details' ? 'bg-accent text-accent-content' : 'text-base-content/50 hover:text-base-content'}`}
                             >
                                 <IoEyeOutline size={14} />
                             </button>
@@ -42,7 +42,7 @@ export function Sidebar({ selectedData, closeSidebar }: SidebarProps) {
                                 role="tab"
                                 aria-label="JSON"
                                 onClick={() => setActiveTab('json')}
-                                className={`p-1.5 rounded-md transition-colors ${activeTab === 'json' ? 'bg-accent text-white' : 'text-base-content/50 hover:text-base-content'}`}
+                                className={`p-1.5 rounded-md transition-colors ${activeTab === 'json' ? 'bg-accent text-accent-content' : 'text-base-content/50 hover:text-base-content'}`}
                             >
                                 <IoCodeOutline size={14} />
                             </button>

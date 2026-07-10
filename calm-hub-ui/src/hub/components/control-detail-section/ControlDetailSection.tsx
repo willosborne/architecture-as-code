@@ -242,7 +242,7 @@ export function ControlDetailSection({ controlData, viewMode }: ControlDetailSec
                                 </div>
                                 {selectedConfigId !== null && configVersions.length > 0 && (
                                     <>
-                                        <span className="text-gray-400">/</span>
+                                        <span className="text-base-content/40">/</span>
                                         <div role="tablist" className="tabs tabs-boxed tabs-sm bg-base-100">
                                             {configVersionButtons}
                                         </div>
@@ -269,11 +269,11 @@ export function ControlDetailSection({ controlData, viewMode }: ControlDetailSec
                     <h2 className="text-sm font-bold flex items-center gap-2 text-primary">
                         <IoShieldCheckmarkOutline className="text-primary" />
                         <span>{controlLabel}</span>
-                        <span className="text-gray-400">/</span>
+                        <span className="text-base-content/40">/</span>
                         <span>Requirement</span>
                         {selectedReqVersion && (
                             <>
-                                <span className="text-gray-400">/</span>
+                                <span className="text-base-content/40">/</span>
                                 <span>{selectedReqVersion}</span>
                             </>
                         )}
@@ -305,17 +305,17 @@ export function ControlDetailSection({ controlData, viewMode }: ControlDetailSec
                     <h2 className="text-sm font-bold flex items-center gap-2">
                         <IoShieldCheckmarkOutline className="text-accent" />
                         <span>{controlLabel}</span>
-                        <span className="text-gray-400">/</span>
+                        <span className="text-base-content/40">/</span>
                         <span>Configurations</span>
                         {selectedCfgLabel && (
                             <>
-                                <span className="text-gray-400">/</span>
+                                <span className="text-base-content/40">/</span>
                                 <span>{selectedCfgLabel}</span>
                             </>
                         )}
                         {selectedConfigVersion && (
                             <>
-                                <span className="text-gray-400">/</span>
+                                <span className="text-base-content/40">/</span>
                                 <span>{selectedConfigVersion}</span>
                             </>
                         )}
@@ -334,7 +334,7 @@ export function ControlDetailSection({ controlData, viewMode }: ControlDetailSec
                     {/* Config version tabs (shown when a config is selected) */}
                     {selectedConfigId !== null && configVersions.length > 0 && (
                         <>
-                            <span className="text-gray-400 self-center">/</span>
+                            <span className="text-base-content/40 self-center">/</span>
                             <div role="tablist" className="tabs tabs-boxed tabs-sm bg-base-100">
                                 {configVersionButtons}
                             </div>

@@ -81,7 +81,7 @@ describe('SectionHeader', () => {
         expect(heading).toHaveTextContent('namespace');
     });
 
-    it('renders slashes with gray styling', () => {
+    it('renders slashes with muted styling', () => {
         const icon = <span>Icon</span>;
 
         const { container } = render(
@@ -94,10 +94,10 @@ describe('SectionHeader', () => {
             />
         );
 
-        const graySpans = container.querySelectorAll('.text-gray-400');
-        expect(graySpans).toHaveLength(2);
-        expect(graySpans[0]).toHaveTextContent('/');
-        expect(graySpans[1]).toHaveTextContent('/');
+        const mutedSpans = container.querySelectorAll('[class*="text-base-content/40"]');
+        expect(mutedSpans).toHaveLength(2);
+        expect(mutedSpans[0]).toHaveTextContent('/');
+        expect(mutedSpans[1]).toHaveTextContent('/');
     });
 
     it('shows share bar with pinned versioned URL when id is a slug', () => {

@@ -115,12 +115,15 @@ describe('ArchitectureGraph', () => {
             expect(style.overflow).toBe('hidden');
         });
 
-        it('gives the minimap a primary-blue viewport rect and a light mask', () => {
+        it('gives the minimap a primary-blue viewport rect and a themed mask', () => {
             render(<ArchitectureGraph jsonData={mockCalmData} />);
             expect(miniMapProps.current?.maskStrokeColor).toBe('#2563EB');
             expect(miniMapProps.current?.maskStrokeWidth).toBe(1.5);
-            // Light (~25%) mask via the `${color}40` alpha-suffix pattern.
-            expect(String(miniMapProps.current?.maskColor)).toMatch(/^#F8FAFC40$/i);
+            // The mask is no longer a prop: ReactFlow writes `maskColor` into an SVG
+            // `fill` attribute, which `var()` cannot reach. It opts into the themed
+            // veil in index.css by class instead.
+            expect(miniMapProps.current?.maskColor).toBeUndefined();
+            expect(miniMapProps.current?.className).toBe('calm-minimap-mask-surface');
         });
 
         it('hides the minimap when toggled off and persists the choice', () => {

@@ -44,15 +44,15 @@ export function SectionHeader({ icon, namespace, id, version, typeSegment, right
                     {typeLabel && (
                         <>
                             {' '}
-                            <span className="text-gray-400">/</span> {typeLabel}
+                            <span className="text-base-content/40">/</span> {typeLabel}
                         </>
                     )}{' '}
-                    <span className="text-gray-400">/</span>{' '}
+                    <span className="text-base-content/40">/</span>{' '}
                     <span title={id}>{displayName || id}</span>
                     {showVersion && (
                         <>
                             {' '}
-                            <span className="text-gray-400">/</span>{' '}
+                            <span className="text-base-content/40">/</span>{' '}
                             {versions && versions.length > 0 ? (
                                 <select
                                     className="select select-ghost text-xl font-semibold !h-auto !min-h-0 !py-0 !pl-1 !pr-6 !leading-tight !border-0 focus:!outline-none"

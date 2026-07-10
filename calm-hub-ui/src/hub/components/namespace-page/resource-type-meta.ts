@@ -95,7 +95,15 @@ export function getResourceTypeMeta(type: CardResourceType): ResourceTypeMeta {
     return RESOURCE_TYPE_META[type];
 }
 
-/** The accent + tint colour pair for a browse (or control) card resource type. */
-export function getResourceTypeColors(type: CardResourceType): { accent: string; tint: string } {
+/**
+ * The colours for a browse (or control) card resource type. `accent` is the fill /
+ * border / stripe value; `accentText` is the same colour in a text or icon role,
+ * which lightens under dark to stay legible on `tint`.
+ */
+export function getResourceTypeColors(type: CardResourceType): {
+    accent: string;
+    accentText: string;
+    tint: string;
+} {
     return colors.resourceTypes[RESOURCE_TYPE_META[type].colorKey];
 }

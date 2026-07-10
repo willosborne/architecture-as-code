@@ -35,7 +35,7 @@ export function ControlCard({ name, description, controlId, active = false, onAc
                     size={30}
                     // Same control-type accent the striped header and pill use, so the
                     // shield can't drift if the control colours are adjusted independently.
-                    style={{ color: colors.resourceTypes.control.accent, opacity: 0.55 }}
+                    style={{ color: colors.resourceTypes.control.accentText, opacity: 0.55 }}
                 />
             }
             active={active}

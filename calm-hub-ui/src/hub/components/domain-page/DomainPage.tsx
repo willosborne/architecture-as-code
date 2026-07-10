@@ -67,7 +67,7 @@ export function DomainPage({ domain, controlCount, onControlLoad, selectedContro
                     className="flex items-center justify-center shrink-0 rounded-[11px]"
                     style={{ width: 44, height: 44, backgroundColor: colors.redesign.tintBg }}
                 >
-                    <IoShieldCheckmarkOutline size={22} style={{ color: colors.redesign.primary }} />
+                    <IoShieldCheckmarkOutline size={22} style={{ color: colors.redesign.primaryText }} />
                 </div>
                 <h1 className="flex-1 min-w-0 truncate text-[27px] font-bold" style={{ color: colors.redesign.ink }}>
                     {domain}

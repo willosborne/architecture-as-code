@@ -126,7 +126,7 @@ export function CustomNode({ data }: NodeProps) {
           <span>{data.label}</span>
           {detailedArchitecture && (
             <div title="Has detailed architecture">
-              <ZoomIn style={{ width: '14px', height: '14px', flexShrink: 0, color: THEME.colors.accent }} />
+              <ZoomIn style={{ width: '14px', height: '14px', flexShrink: 0, color: THEME.colors.accentText }} />
             </div>
           )}
         </div>
@@ -179,7 +179,7 @@ export function CustomNode({ data }: NodeProps) {
                   fontSize: '12px',
                   fontWeight: 500,
                   background: `${THEME.colors.accent}20`,
-                  color: THEME.colors.accent,
+                  color: THEME.colors.accentText,
                 }}
               >
                 <Shield style={{ width: '12px', height: '12px' }} />
@@ -210,7 +210,7 @@ export function CustomNode({ data }: NodeProps) {
         >
           <div style={{ borderTop: `1px solid ${THEME.colors.border}`, paddingTop: '8px' }}>
             <div style={{ fontSize: '12px', color: THEME.colors.muted, marginBottom: '4px' }}>Type:</div>
-            <div style={{ fontSize: '12px', fontWeight: 500, color: THEME.colors.accent }}>{nodeType}</div>
+            <div style={{ fontSize: '12px', fontWeight: 500, color: THEME.colors.accentText }}>{nodeType}</div>
           </div>
           {riskLevel && (
             <div style={{ borderTop: `1px solid ${THEME.colors.border}`, paddingTop: '8px', marginTop: '8px' }}>
@@ -279,7 +279,7 @@ export function CustomNode({ data }: NodeProps) {
                       }}
                       title="Click to jump to control definition"
                     >
-                      <div style={{ fontWeight: 500, color: THEME.colors.accent }}>{controlId}</div>
+                      <div style={{ fontWeight: 500, color: THEME.colors.accentText }}>{controlId}</div>
                       {control.description && (
                         <div style={{ color: THEME.colors.muted, marginLeft: '8px' }}>{control.description}</div>
                       )}

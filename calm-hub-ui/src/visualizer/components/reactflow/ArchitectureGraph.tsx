@@ -219,7 +219,10 @@ export function ArchitectureGraph({ jsonData, onNodeClick, onEdgeClick, viewport
                 attributionPosition="bottom-left"
                 style={{ background: THEME.colors.background }}
             >
-                <Background color={THEME.colors.border} gap={16} />
+                {/* The dot colour is set in index.css, not here: ReactFlow writes this
+                    prop into an SVG `fill` presentation attribute, where `var()` does
+                    not resolve. */}
+                <Background gap={16} />
                 {!isMobile && (
                     <Controls
                         style={{
@@ -236,7 +239,7 @@ export function ArchitectureGraph({ jsonData, onNodeClick, onEdgeClick, viewport
                         >
                             <MapIcon
                                 size={14}
-                                color={minimapHidden ? THEME.colors.muted : colors.redesign.primary}
+                                color={minimapHidden ? THEME.colors.muted : colors.redesign.primaryText}
                             />
                         </ControlButton>
                     </Controls>
@@ -259,6 +262,7 @@ export function ArchitectureGraph({ jsonData, onNodeClick, onEdgeClick, viewport
                 {!isMobile && !minimapHidden && (
                     <MiniMap
                         data-testid="diagram-minimap"
+                        className="calm-minimap-mask-surface"
                         pannable
                         zoomable
                         // Fixed compact panel so the minimap can't overflow the canvas
@@ -278,10 +282,9 @@ export function ArchitectureGraph({ jsonData, onNodeClick, onEdgeClick, viewport
                         // not solid accent on every node.
                         nodeColor={`${colors.redesign.primary}40`}
                         nodeStrokeColor={`${colors.redesign.primary}66`}
-                        // Light mask (~25%) so the surrounding field stays faint and the
-                        // transparent viewport hole reads clearly; the primary-blue stroke
-                        // outlines the current viewport rect.
-                        maskColor={`${colors.redesign.surface}40`}
+                        // The ~25% mask that keeps the surrounding field faint is applied
+                        // in index.css via `.calm-minimap-mask-surface`: `maskColor` lands
+                        // in an SVG `fill` attribute, which `var()` cannot reach.
                         maskStrokeColor={colors.redesign.primary}
                         maskStrokeWidth={1.5}
                     />
