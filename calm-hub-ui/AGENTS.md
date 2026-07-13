@@ -10,64 +10,94 @@ This guide helps AI assistants work efficiently with the CALM Hub UI frontend co
 - **Testing**: Vitest, React Testing Library, Cypress (E2E)
 - **Styling**: TailwindCSS + DaisyUI
 - **HTTP Client**: Axios
-- **Auth**: OIDC via `oidc-client-ts` / `react-oidc-context`
+- **Auth**: OIDC via `oidc-client-ts` (see `src/authService.tsx`)
 
 ## Key Commands
 
 ```bash
 # All commands from repository root using workspaces
-npm run build --workspace calm-hub-ui     # Production build
+npm run build --workspace calm-hub-ui     # Production build (vite build → build/)
 npm test --workspace calm-hub-ui          # Run unit tests (vitest run)
-npm run lint --workspace calm-hub-ui      # Lint
-npm run dev --workspace calm-hub-ui       # Dev server with hot reload
+npm run lint --workspace calm-hub-ui      # Lint (eslint + stylelint on src/**/*.css)
+npm run start --workspace calm-hub-ui     # Dev server with hot reload
+
+# Root-level aliases
+npm run calm-hub-ui:run                    # Alias for `start`
+npm run build:calm-hub-ui                  # Build calm-models + calm-hub-ui
+npm run calm-hub-ui:prod                   # Build, then rsync build/ into calm-hub resources
 ```
+
+The build output goes to `build/` (Vite `outDir`). `npm run prod` (via the
+`calm-hub-ui:prod` alias) copies that output into
+`../calm-hub/src/main/resources/META-INF/resources` — the UI ships **embedded
+in the Quarkus backend**. A `copy-public` prebuild step copies brand assets from
+`../brand` into `public/` before both `start` and `build`.
 
 ## Directory Structure
 
 ```
 src/
+├── authService.tsx       # OIDC auth (oidc-client-ts) + getAuthHeaders helper
+├── ProtectedRoute.tsx    # Route guard for authenticated routes
 ├── service/              # API service classes (axios-based)
 ├── model/                # TypeScript interfaces and types
 ├── hub/
 │   └── components/       # Feature components
 │       ├── tree-navigation/
 │       ├── control-detail-section/
+│       ├── interface-detail-section/
 │       ├── document-detail-section/
 │       ├── diagram-section/
 │       ├── json-renderer/
 │       ├── adr-renderer/
 │       ├── section-header/
 │       └── value-table/
+├── visualizer/           # Architecture visualiser (largest subtree)
+│   ├── components/       # UI: reactflow/, sidebar/, drawer/
+│   ├── contracts/        # Typed *-contracts.ts interface definitions
+│   ├── helpers/          # Pure helpers (e.g. set-functions)
+│   └── services/         # e.g. node-position-service
+├── diff/                 # Architecture diff view (components, model, fixtures)
 ├── components/           # Shared/common components
-├── visualizer/           # Architecture visualiser
 ├── fixtures/             # Test fixtures
 └── theme/                # Theme configuration
 ```
+
+The `visualizer/contracts/*-contracts.ts` files hold the typed interfaces shared
+across the visualiser (nodes, edges, decorators, panels, etc.); add new
+visualiser-facing types there rather than inline.
 
 ## Conventions
 
 ### Service Pattern
 
-All API services follow a **class-based pattern with injectable Axios instances**, matching `CalmService` as the reference implementation:
+All API services follow a **class-based pattern with injectable Axios instances**. `ControlService` (`src/service/control-service.ts`) is the clearest reference; `InterfaceService` and `SearchService` follow the same shape:
 
 ```typescript
 import axios, { AxiosInstance } from 'axios';
+import { getAuthHeaders } from '../authService.js';
 
-class MyService {
-    private ax: AxiosInstance;
+export class MyService {
+    private readonly ax: AxiosInstance;
 
-    constructor(ax: AxiosInstance = axios.create()) {
-        this.ax = ax;
+    constructor(axiosInstance?: AxiosInstance) {
+        if (axiosInstance) {
+            this.ax = axiosInstance;
+        } else {
+            this.ax = axios.create();
+        }
     }
 
-    async fetchItems(): Promise<Item[]> {
-        try {
-            const response = await this.ax.get<Item[]>('/api/items');
-            return response.data;
-        } catch (error) {
-            console.error('%s', error);
-            return Promise.reject(new Error('Failed to fetch items'));
-        }
+    public async fetchItems(domain: string): Promise<Item[]> {
+        const headers = await getAuthHeaders();
+        return this.ax
+            .get(`/calm/domains/${encodeURIComponent(domain)}/items`, { headers })
+            .then((res) => (Array.isArray(res.data?.values) ? res.data.values : []))
+            .catch((error) => {
+                const errorMessage = `Error fetching items for domain ${domain}:`;
+                console.error('%s', errorMessage, error);
+                return Promise.reject(new Error(errorMessage));
+            });
     }
 }
 ```
@@ -75,9 +105,13 @@ class MyService {
 Key rules:
 - Constructor accepts an optional `AxiosInstance` (defaults to `axios.create()`)
 - Methods return promises directly — **no setter callbacks**
-- Errors use `Promise.reject(new Error(...))`, not thrown exceptions
-- Log errors with `console.error('%s', error)` (format-string style)
+- Resolve auth via `await getAuthHeaders()` and pass `{ headers }` to each request
+- Use `.then(...).catch(...)` chaining; on error log then `Promise.reject(new Error(...))`
+- Log errors in the format-string style: `console.error('%s', errorMessage, error)`
 - Encode user-supplied path segments with `encodeURIComponent`
+
+> Note: the older `CalmService` (`src/service/calm-service.tsx`) predates these
+> conventions and is not a clean template — prefer the services above.
 
 ### Service Testing Pattern
 
@@ -126,9 +160,157 @@ Instead, place `HeaderSection` and `BodySection` in their own files and import t
 - Use `useCallback` for functions referenced in `useEffect` dependency arrays
 - **Never suppress** `react-hooks/exhaustive-deps` — fix the dependency array properly
 
+## Theming (light + dark)
+
+The app ships a light and a dark theme. `<html data-theme>` is the **single source of
+truth**: it is always present and always `light` or `dark`.
+
+### The two systems, and why tokens are split
+
+Colour reaches the DOM two ways, and both must be satisfied:
+
+1. **daisyUI semantic classes** (`bg-base-100`, `text-base-content`, `btn-primary`).
+   These follow `data-theme` for free.
+2. **`src/theme/colors.ts`**, consumed by **inline `style` props** in ~35 files (the
+   ReactFlow visualiser, timeline, explore rail, namespace cards). `data-theme` cannot
+   reach these, because JavaScript bakes the value into the DOM.
+
+So `colors.ts` leaves come in two flavours, and which one a token gets is **not** an
+aesthetic choice:
+
+- **Neutrals** (surfaces, text, borders, washes, the `ink` ramp) are `var(--calm-…)`
+  strings, defined per theme in `src/theme/theme.css`. Inline styles resolve them
+  against the active `data-theme`. No React state, no provider.
+- **Chromatic** values (node-type hues, risk/status, brand accents) stay **hex**,
+  because they are alpha-concatenated (`` `${color}20` ``) — `var(--x)20` is not a
+  colour — and because ReactFlow serialises some into SVG presentation attributes.
+
+### Adding a colour
+
+- Neutral? Add `--calm-*` to **both** blocks in `theme.css` and point `colors.ts` at it.
+  The `[data-theme='light']` value must equal the hex it replaces — light mode must not
+  move.
+- Chromatic and used as **text or an icon**? It needs a separate `…Text` token
+  (`brand.accentText`, `redesign.primaryText`, `resourceTypes.*.accentText`). `#007dff`
+  and `#2563EB` cannot reach 4.5:1 on *any* dark background, not even black, so the
+  text role has to lighten while the fill/border/stripe role does not. Check every new
+  dark tint against its accent with a contrast checker.
+
+### Three traps that have already bitten
+
+1. **SVG presentation attributes ignore `var()`.** ReactFlow writes `<Background color>`
+   and `<MiniMap nodeColor/maskColor>` straight into `fill`/`stroke` attributes. Don't
+   pass theme colours through those props — omit them and style
+   `.react-flow__background circle`, `.react-flow__minimap-mask` etc. in `index.css`,
+   where a CSS *property* beats the attribute.
+2. **`reactflow/dist/style.css` is bundled after `index.css`.** It defines
+   `.react-flow__controls-button`, `.react-flow__minimap` and `.react-flow__attribution a`,
+   so an unqualified override here silently loses the source-order tie. Scope ours under
+   `.react-flow` to win on specificity.
+3. **Components with their own theme system need telling.** Monaco (`JsonRenderer`)
+   paints its own colours. Use `useResolvedTheme()` from `src/theme/useTheme.ts`, which
+   observes the `data-theme` attribute — never call `useTheme()` a second time, as each
+   call holds its own state and the copies drift apart when the toggle is pressed.
+   Monaco's theme API takes literal hex and cannot read `--calm-*`, so the dark editor
+   chrome is duplicated in `src/theme/monaco-theme.ts`; `monaco-theme.test.ts` parses
+   theme.css and fails if the copies drift. It registers the theme from `beforeMount`
+   unconditionally — an editor first mounted in light must still be able to switch.
+
+### Toggle and persistence
+
+`useTheme(storage?)` owns the attribute. It reads `localStorage['calm-theme']`
+(`light` | `dark` | absent → follow the OS via `prefers-color-scheme`, tracked live).
+An inline script in `index.html` applies the same resolution before the bundle loads,
+so there is no flash; do **not** rely on daisyUI's `--prefersdark`, which emits a media
+query for daisyUI's own variables only and would leave every `--calm-*` token unresolved.
+
+Pass a `createMemoryStorage()` from `src/test-support/memory-storage.ts` in tests.
+
+### Testing colour
+
+jsdom's inline-style resolver keeps `var(...)` and `color-mix(...)` verbatim but
+normalises hex to `rgb(...)`. So assert **by reference**
+(`toHaveStyle({ backgroundColor: colors.redesign.tintBg })`), never against a literal
+hex — a literal will break the moment the token becomes a var.
+
+Beware the `mockViewport`/`mockMobileViewport` helpers: they return `matches: <isMobile>`
+for **every** query, not just the width one. Since the Navbar also asks for
+`(prefers-color-scheme: dark)`, a `mockMobileViewport(true)` test silently resolves the
+theme to dark and stamps `data-theme="dark"` on the document. Harmless for the
+assertions that exist today, but if you write a theme-sensitive assertion inside a
+mobile test, match on the query string in the mock.
+
+## Responsive Design
+
+The CALM Hub UI is **mobile responsive** — it must be usable on phones as well as
+desktops. Both renders are first-class; a change is not complete until it has been
+verified at **both** a desktop and a mobile viewport.
+
+### The `useIsMobile` hook
+
+Layout decisions key off `src/hooks/useMediaQuery.ts`:
+
+- `useMediaQuery(query)` — subscribes to a CSS media query (test-safe: returns
+  `false` when `window.matchMedia` is absent, so components fall back to desktop).
+- `useIsMobile()` — `useMediaQuery('(max-width: 1023px)')`. The breakpoint is
+  Tailwind's `lg` (1024px): anything narrower is treated as mobile.
+
+```typescript
+const isMobile = useIsMobile();
+if (!isMobile) {
+    return <DesktopLayout … />;   // early-return keeps desktop untouched
+}
+return <MobileLayout … />;
+```
+
+### Mobile-only changes must not alter desktop
+
+When adding or reworking mobile behaviour, **branch on `isMobile` and keep the
+desktop path byte-for-byte unchanged** (an early `return` for the desktop layout is
+the clearest way). Reviewers have repeatedly rejected diffs that "accidentally"
+restyled desktop while targeting mobile — don't.
+
+### Established mobile patterns
+
+- **Full-screen push overlays**, not float-overs: menus, the view-options menu, the
+  timeline, and detail panels take over the viewport (`fixed inset-0`,
+  `animate-slide-in-right`) rather than floating above the canvas where iOS chrome
+  would hide them.
+- **Navbar-hosted actions**: page-level controls (e.g. the diagram view-options
+  menu) portal into the navbar `#navbar-actions` slot instead of floating in the
+  render pane. See `components/navbar/Navbar.tsx` and `diagram-section/DiagramSection.tsx`.
+- **iOS-style drill-down explorer** on mobile (`tree-navigation/MobileNavMenu.tsx`):
+  one flat list per level, not a tree.
+- **Full-bleed render pane** with the minimap/zoom controls hidden (pinch is the
+  native gesture) — see `visualizer/components/reactflow/`.
+- **Tabbed detail views** where desktop stacks panels (e.g.
+  `control-detail-section/ControlDetailSection.tsx` shows Requirement/Configuration
+  as tabs on mobile).
+- **Device safe areas**: `viewport-fit=cover` in `index.html` plus
+  `env(safe-area-inset-*)` so the navbar clears the notch (`navbar/Navbar.css`).
+
+Reference components for the patterns above: `hub/Hub.tsx`, `components/navbar/Navbar.tsx`,
+`hub/components/diagram-section/DiagramSection.tsx`,
+`hub/components/tree-navigation/MobileNavMenu.tsx`, and
+`hub/components/control-detail-section/ControlDetailSection.tsx`.
+
 ## Testing
 
 - Unit tests use Vitest + React Testing Library
 - All new components and services must have tests
 - Mock services at the module level with `vi.mock` and class constructor patterns
 - E2E tests are in `cypress/`
+
+### Test both desktop and mobile
+
+Any change that touches layout/rendering **must be verified at both a desktop and a
+mobile viewport** — never just one.
+
+- **Unit tests**: components that branch on `useIsMobile()` need cases for both
+  renders. Drive the breakpoint by mocking `window.matchMedia` (returning
+  `matches: true` simulates mobile, `false` desktop). `ControlDetailSection.test.tsx`
+  and `hub/Hub.test.tsx` show the `mockViewport`/`mockMobileViewport` helper pattern.
+  The default (no mock) reports desktop, so add explicit mobile cases.
+- **Manual/visual check**: run `npm run start --workspace calm-hub-ui` and confirm the
+  change at a desktop width and at a mobile width (≤1023px — e.g. a 390px-wide device
+  in browser dev-tools). Confirm desktop is unchanged when the work was mobile-only.

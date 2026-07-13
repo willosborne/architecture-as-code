@@ -4,15 +4,17 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import org.bson.json.JsonParseException;
 import org.finos.calm.domain.Architecture;
 import org.finos.calm.domain.architecture.ArchitectureRequest;
-import org.finos.calm.domain.architecture.NamespaceArchitectureSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.domain.exception.ArchitectureNotFoundException;
 import org.finos.calm.domain.exception.ArchitectureVersionExistsException;
 import org.finos.calm.domain.exception.ArchitectureVersionNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.store.ArchitectureStore;
+import org.finos.calm.store.PageRequest;
 import org.finos.calm.store.TimelineStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,21 +23,21 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
 import static io.restassured.RestAssured.given;
+import static org.finos.calm.resources.ResourceValidationConstants.LIMIT_MESSAGE;
 import static org.finos.calm.resources.ResourceValidationConstants.NAMESPACE_MESSAGE;
+import static org.finos.calm.resources.ResourceValidationConstants.OFFSET_MESSAGE;
 import static org.finos.calm.resources.ResourceValidationConstants.VERSION_MESSAGE;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
+@TestSecurity(authorizationEnabled = false)
 @QuarkusTest
 @ExtendWith(MockitoExtension.class)
 public class TestArchitectureResourceShould {
@@ -52,22 +54,22 @@ public class TestArchitectureResourceShould {
 
     @Test
     void return_a_404_when_an_invalid_namespace_is_provided_on_get_architectures() throws NamespaceNotFoundException {
-        when(mockArchitectureStore.getArchitecturesForNamespace(anyString())).thenThrow(new NamespaceNotFoundException());
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenThrow(new NamespaceNotFoundException());
 
         given()
                 .when()
-                .get("/calm/namespaces/invalid/architectures")
+                .get("/api/calm/namespaces/invalid/architectures")
                 .then()
                 .statusCode(404);
 
-        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("invalid");
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("invalid", PageRequest.UNPAGED);
     }
 
     @Test
     void return_a_400_when_an_invalid_format_of_namespace_is_provided_on_get_architectures() throws NamespaceNotFoundException {
         given()
                 .when()
-                .get("/calm/namespaces/fin_os/architectures")
+                .get("/api/calm/namespaces/fin_os/architectures")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -75,25 +77,60 @@ public class TestArchitectureResourceShould {
 
     @Test
     void return_list_of_architecture_ids_when_valid_namespace_provided_on_get_architectures() throws NamespaceNotFoundException {
-        List<NamespaceArchitectureSummary> summaries = List.of(
-                new NamespaceArchitectureSummary("Arch One", "First architecture", 12345),
-                new NamespaceArchitectureSummary("Arch Two", "Second architecture", 54321)
+        List<NamespaceResourceSummary> summaries = List.of(
+                new NamespaceResourceSummary("Arch One", "First architecture", 12345, 3),
+                new NamespaceResourceSummary("Arch Two", "Second architecture", 54321, 1)
         );
-        when(mockArchitectureStore.getArchitecturesForNamespace(anyString())).thenReturn(summaries);
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenReturn(summaries);
 
         given()
                 .when()
-                .get("/calm/namespaces/finos/architectures")
+                .get("/api/calm/namespaces/finos/architectures")
                 .then()
                 .statusCode(200)
                 .body("values[0].name", equalTo("Arch One"))
                 .body("values[0].description", equalTo("First architecture"))
                 .body("values[0].id", equalTo(12345))
+                .body("values[0].versionCount", equalTo(3))
                 .body("values[1].name", equalTo("Arch Two"))
                 .body("values[1].description", equalTo("Second architecture"))
-                .body("values[1].id", equalTo(54321));
+                .body("values[1].id", equalTo(54321))
+                .body("values[1].versionCount", equalTo(1));
 
-        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos");
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos", PageRequest.UNPAGED);
+    }
+
+    @Test
+    void pass_limit_and_offset_to_store_when_provided_on_get_architectures() throws NamespaceNotFoundException {
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenReturn(List.of());
+
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?limit=3&offset=6")
+                .then()
+                .statusCode(200);
+
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos", new PageRequest(3, 6));
+    }
+
+    @Test
+    void return_a_400_when_limit_is_less_than_one_on_get_architectures() {
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?limit=0")
+                .then()
+                .statusCode(400)
+                .body(containsString(LIMIT_MESSAGE));
+    }
+
+    @Test
+    void return_a_400_when_offset_is_negative_on_get_architectures() {
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?offset=-1")
+                .then()
+                .statusCode(400)
+                .body(containsString(OFFSET_MESSAGE));
     }
 
     @Test
@@ -112,7 +149,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body(objectMapper.writeValueAsString(architectureRequest))
                 .when()
-                .post("/calm/namespaces/invalid/architectures")
+                .post("/api/calm/namespaces/invalid/architectures")
                 .then()
                 .statusCode(404);
 
@@ -137,7 +174,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body(architecture)
                 .when()
-                .post("/calm/namespaces/invalid/architectures")
+                .post("/api/calm/namespaces/invalid/architectures")
                 .then()
                 .statusCode(400);
 
@@ -149,7 +186,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body("{ \"test\": \"json\" }")
                 .when()
-                .post("/calm/namespaces/fin_os/architectures")
+                .post("/api/calm/namespaces/fin_os/architectures")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -180,11 +217,11 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body(objectMapper.writeValueAsString(architectureRequest))
                 .when()
-                .post("/calm/namespaces/finos/architectures")
+                .post("/api/calm/namespaces/finos/architectures")
                 .then()
                 .statusCode(201)
                 //Derived from stubbed architecture in resource
-                .header("Location", containsString("/calm/namespaces/finos/architectures/12/versions/1.0.0"));
+                .header("Location", containsString("/api/calm/namespaces/finos/architectures/12/versions/1.0.0"));
 
         Architecture expectedArchitectureToCreate = new Architecture.ArchitectureBuilder()
                 .setArchitecture(architectureJson)
@@ -200,7 +237,7 @@ public class TestArchitectureResourceShould {
     void return_a_400_when_an_invalid_format_of_namespace_is_provided_on_get_architecture_versions() throws NamespaceNotFoundException {
         given()
                 .when()
-                .get("/calm/namespaces/fin_os/architectures/12/versions")
+                .get("/api/calm/namespaces/fin_os/architectures/12/versions")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -237,14 +274,14 @@ public class TestArchitectureResourceShould {
             String expectedBody = "{\"values\":[\"1.0.0\",\"1.0.1\"]}";
             given()
                     .when()
-                    .get("/calm/namespaces/" + namespace + "/architectures/12/versions")
+                    .get("/api/calm/namespaces/" + namespace + "/architectures/12/versions")
                     .then()
                     .statusCode(expectedStatusCode)
                     .body(equalTo(expectedBody));
         } else {
             given()
                     .when()
-                    .get("/calm/namespaces/" + namespace + "/architectures/12/versions")
+                    .get("/api/calm/namespaces/" + namespace + "/architectures/12/versions")
                     .then()
                     .statusCode(expectedStatusCode);
         }
@@ -256,7 +293,7 @@ public class TestArchitectureResourceShould {
     void return_a_400_when_an_invalid_format_of_namespace_is_provided_on_get_architecture() throws NamespaceNotFoundException {
         given()
                 .when()
-                .get("/calm/namespaces/fin_os/architectures/12/versions/1.0.0")
+                .get("/api/calm/namespaces/fin_os/architectures/12/versions/1.0.0")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -266,7 +303,7 @@ public class TestArchitectureResourceShould {
     void return_a_400_when_an_invalid_format_of_version_is_provided_on_get_architecture() throws NamespaceNotFoundException {
         given()
                 .when()
-                .get("/calm/namespaces/finos/architectures/12/versions/1.0.invalid0")
+                .get("/api/calm/namespaces/finos/architectures/12/versions/1.0.invalid0")
                 .then()
                 .statusCode(400)
                 .body(containsString(VERSION_MESSAGE));
@@ -304,14 +341,14 @@ public class TestArchitectureResourceShould {
         if (expectedStatusCode == 200) {
             given()
                     .when()
-                    .get("/calm/namespaces/" + namespace + "/architectures/12/versions/1.0.0")
+                    .get("/api/calm/namespaces/" + namespace + "/architectures/12/versions/1.0.0")
                     .then()
                     .statusCode(expectedStatusCode)
                     .body(equalTo("{ \"test\": \"json\" }"));
         } else {
             given()
                     .when()
-                    .get("/calm/namespaces/" + namespace + "/architectures/12/versions/1.0.0")
+                    .get("/api/calm/namespaces/" + namespace + "/architectures/12/versions/1.0.0")
                     .then()
                     .statusCode(expectedStatusCode);
         }
@@ -325,7 +362,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body("{ \"test\": \"json\" }")
                 .when()
-                .post("/calm/namespaces/fin_os/architectures/20/versions/1.0.1")
+                .post("/api/calm/namespaces/fin_os/architectures/20/versions/1.0.1")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -337,7 +374,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body("{ \"test\": \"json\" }")
                 .when()
-                .post("/calm/namespaces/finos/architectures/20/versions/1.0.invalid1")
+                .post("/api/calm/namespaces/finos/architectures/20/versions/1.0.invalid1")
                 .then()
                 .statusCode(400)
                 .body(containsString(VERSION_MESSAGE));
@@ -348,6 +385,7 @@ public class TestArchitectureResourceShould {
                 Arguments.of(new NamespaceNotFoundException(), 404),
                 Arguments.of(new ArchitectureNotFoundException(), 404),
                 Arguments.of(new ArchitectureVersionExistsException(), 409),
+                Arguments.of(new JsonParseException(), 400),
                 Arguments.of(null, 201)
         );
     }
@@ -380,17 +418,17 @@ public class TestArchitectureResourceShould {
                     .header("Content-Type", "application/json")
                     .body(architectureRequest)
                     .when()
-                    .post("/calm/namespaces/test/architectures/20/versions/1.0.1")
+                    .post("/api/calm/namespaces/test/architectures/20/versions/1.0.1")
                     .then()
                     .statusCode(expectedStatusCode)
                     //Derived from stubbed architecture in resource
-                    .header("Location", containsString("/calm/namespaces/test/architectures/20/versions/1.0.1"));
+                    .header("Location", containsString("/api/calm/namespaces/test/architectures/20/versions/1.0.1"));
         } else {
             given()
                     .header("Content-Type", "application/json")
                     .body(architectureRequest)
                     .when()
-                    .post("/calm/namespaces/test/architectures/20/versions/1.0.1")
+                    .post("/api/calm/namespaces/test/architectures/20/versions/1.0.1")
                     .then()
                     .statusCode(expectedStatusCode);
         }
@@ -404,7 +442,7 @@ public class TestArchitectureResourceShould {
                 .header("Content-Type", "application/json")
                 .body("{ \"test\": \"json\" }")
                 .when()
-                .put("/calm/namespaces/test/architectures/20/versions/1.0.1")
+                .put("/api/calm/namespaces/test/architectures/20/versions/1.0.1")
                 .then()
                 .statusCode(403);
     }
@@ -416,7 +454,7 @@ public class TestArchitectureResourceShould {
 
         given()
                 .when()
-                .get("/calm/namespaces/invalid/architectures/42/timeline")
+                .get("/api/calm/namespaces/invalid/architectures/42/timeline")
                 .then()
                 .statusCode(404);
     }
@@ -428,7 +466,7 @@ public class TestArchitectureResourceShould {
 
         given()
                 .when()
-                .get("/calm/namespaces/finos/architectures/42/timeline")
+                .get("/api/calm/namespaces/finos/architectures/42/timeline")
                 .then()
                 .statusCode(404);
     }
@@ -437,7 +475,7 @@ public class TestArchitectureResourceShould {
     void return_a_400_when_an_invalid_format_of_namespace_is_provided_on_get_architecture_timeline() {
         given()
                 .when()
-                .get("/calm/namespaces/fin_os/architectures/42/timeline")
+                .get("/api/calm/namespaces/fin_os/architectures/42/timeline")
                 .then()
                 .statusCode(400)
                 .body(containsString(NAMESPACE_MESSAGE));
@@ -451,7 +489,7 @@ public class TestArchitectureResourceShould {
 
         given()
                 .when()
-                .get("/calm/namespaces/finos/architectures/42/timeline")
+                .get("/api/calm/namespaces/finos/architectures/42/timeline")
                 .then()
                 .statusCode(200)
                 .body("'$schema'", equalTo("https://calm.finos.org/release/1.2/meta/calm-timeline.json"))
@@ -459,7 +497,7 @@ public class TestArchitectureResourceShould {
                 .body("moments[0].'unique-id'", equalTo("1.0.0"))
                 .body("moments[0].'node-type'", equalTo("moment"))
                 .body("moments[0].details.'detailed-architecture'",
-                        equalTo("/calm/namespaces/finos/architectures/42/versions/1.0.0"))
+                        equalTo("/api/calm/namespaces/finos/architectures/42/versions/1.0.0"))
                 .body("moments[1].'unique-id'", equalTo("1.1.0"));
     }
 }

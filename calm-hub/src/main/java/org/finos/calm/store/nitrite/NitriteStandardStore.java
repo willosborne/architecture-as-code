@@ -15,9 +15,10 @@ import org.finos.calm.domain.exception.StandardNotFoundException;
 import org.finos.calm.domain.exception.StandardVersionExistsException;
 import org.finos.calm.domain.exception.StandardVersionNotFoundException;
 import org.finos.calm.domain.standards.CreateStandardRequest;
-import org.finos.calm.domain.standards.NamespaceStandardSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.store.StandardStore;
 import org.finos.calm.store.util.TypeSafeNitriteDocument;
+import org.finos.calm.store.util.VersionKeySelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +64,7 @@ public class NitriteStandardStore implements StandardStore {
 
 
     @Override
-    public List<NamespaceStandardSummary> getStandardsForNamespace(String namespace) throws NamespaceNotFoundException {
+    public List<NamespaceResourceSummary> getStandardsForNamespace(String namespace) throws NamespaceNotFoundException {
         if (!namespaceStore.namespaceExists(namespace)) {
             LOG.warn("Namespace '{}' not found when retrieving standards", namespace);
             throw new NamespaceNotFoundException();
@@ -84,13 +85,17 @@ public class NitriteStandardStore implements StandardStore {
             return List.of();
         }
 
-        List<NamespaceStandardSummary> namespaceStandardSummary = new ArrayList<>();
+        List<NamespaceResourceSummary> namespaceStandardSummary = new ArrayList<>();
 
         for (Document standard : standards) {
-            NamespaceStandardSummary summary = new NamespaceStandardSummary(
+            // Count versions from the already-in-memory sub-document (O(1), no extra query).
+            Object rawVersions = standard.get(VERSIONS_FIELD);
+            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+            NamespaceResourceSummary summary = new NamespaceResourceSummary(
                     standard.get(NAME_FIELD, String.class),
                     standard.get(DESCRIPTION_FIELD, String.class),
-                    standard.get(STANDARD_ID_FIELD, Integer.class)
+                    standard.get(STANDARD_ID_FIELD, Integer.class),
+                    versionCount
             );
             namespaceStandardSummary.add(summary);
         }
@@ -172,6 +177,9 @@ public class NitriteStandardStore implements StandardStore {
         }
 
         Document versions = standardDoc.get(VERSIONS_FIELD, Document.class);
+        if (versions == null) {
+            throw new StandardNotFoundException();
+        }
         Set<String> fieldNames = versions.getFields();
         List<String> versionList = new ArrayList<>();
         for (String fieldName : fieldNames) {
@@ -196,10 +204,14 @@ public class NitriteStandardStore implements StandardStore {
         }
 
         Document versions = standardDocument.get(VERSIONS_FIELD, Document.class);
-        String mongoVersion = version.replace('.', '-');
-        String storedStandard = versions.get(mongoVersion, String.class);
+        if (versions == null) {
+            throw new StandardVersionNotFoundException();
+        }
 
-        if (storedStandard == null) {
+        String mongoVersion = version.replace('.', '-');
+        Object versionObj = versions.get(mongoVersion);
+
+        if (!(versionObj instanceof String)) {
             LOG.warn("Version '{}' not found for standard {} in namespace '{}'",
                     mongoVersion, standardId, namespace);
             throw new StandardVersionNotFoundException();
@@ -208,7 +220,7 @@ public class NitriteStandardStore implements StandardStore {
         LOG.debug("Retrieved version '{}' for standard {} in namespace '{}'",
                 mongoVersion, standardId, namespace);
 
-        return storedStandard;
+        return (String) versionObj;
     }
 
     @Override
@@ -236,6 +248,9 @@ public class NitriteStandardStore implements StandardStore {
             String mongoVersion = version.replace('.','-');
 
             Document versions = standardDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new StandardNotFoundException();
+            }
             if (versions.containsKey(mongoVersion)) {
                 LOG.warn("Version '{}' already exists for standard {} in namespace '{}'",
                         mongoVersion, standardId, namespace);

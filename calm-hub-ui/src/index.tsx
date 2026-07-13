@@ -4,10 +4,8 @@ import ReactDOM from 'react-dom/client';
 import ProtectedRoute from './ProtectedRoute.js';
 import { isAuthServiceEnabled } from './authService.js';
 import App from './App.js';
-import { initThemeCssVars } from './theme/colors.js';   
 import { LogoutButton } from './components/logout-button/LogoutButton.js';
-
-initThemeCssVars();
+import { AuthErrorModal } from './AuthModalError.js';
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
@@ -23,5 +21,6 @@ root.render(
         ) : (
             <App />
         )}
+        <AuthErrorModal />
     </React.StrictMode>
 );

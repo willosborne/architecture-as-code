@@ -5,12 +5,14 @@ import org.dizitart.no2.collection.Document;
 import org.dizitart.no2.collection.DocumentCursor;
 import org.dizitart.no2.collection.NitriteCollection;
 import org.dizitart.no2.filters.Filter;
+import org.bson.json.JsonParseException;
 import org.finos.calm.domain.Architecture;
-import org.finos.calm.domain.architecture.NamespaceArchitectureSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.domain.exception.ArchitectureNotFoundException;
 import org.finos.calm.domain.exception.ArchitectureVersionExistsException;
 import org.finos.calm.domain.exception.ArchitectureVersionNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
+import org.finos.calm.store.PageRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -82,7 +85,7 @@ public class TestNitriteArchitectureStoreShould {
         when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
 
         // Act
-        List<NamespaceArchitectureSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         // Assert
         assertThat(result.isEmpty(), is(true));
@@ -103,7 +106,7 @@ public class TestNitriteArchitectureStoreShould {
         when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
 
         // Act
-        List<NamespaceArchitectureSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         // Assert
         assertThat(result.isEmpty(), is(true));
@@ -123,7 +126,7 @@ public class TestNitriteArchitectureStoreShould {
         when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
 
         // Act
-        List<NamespaceArchitectureSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         // Assert
         assertThat(result.isEmpty(), is(true));
@@ -138,11 +141,13 @@ public class TestNitriteArchitectureStoreShould {
         Document doc1 = Document.createDocument()
                 .put("architectureId", 1001)
                 .put("name", "Arch One")
-                .put("description", "First architecture");
+                .put("description", "First architecture")
+                .put("versions", Document.createDocument().put("1-0-0", "{}").put("2-0-0", "{}"));
         Document doc2 = Document.createDocument()
                 .put("architectureId", 1002)
                 .put("name", "Arch Two")
-                .put("description", "Second architecture");
+                .put("description", "Second architecture")
+                .put("versions", Document.createDocument().put("1-0-0", "{}"));
         List<Document> architectures = Arrays.asList(doc1, doc2);
 
         Document namespaceDoc = Document.createDocument()
@@ -154,17 +159,70 @@ public class TestNitriteArchitectureStoreShould {
         when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
 
         // Act
-        List<NamespaceArchitectureSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         // Assert
         assertThat(result.size(), is(2));
         assertThat(result.get(0).getId(), is(1001));
         assertThat(result.get(0).getName(), is("Arch One"));
         assertThat(result.get(0).getDescription(), is("First architecture"));
+        assertThat(result.get(0).getVersionCount(), is(2));
         assertThat(result.get(1).getId(), is(1002));
         assertThat(result.get(1).getName(), is("Arch Two"));
         assertThat(result.get(1).getDescription(), is("Second architecture"));
+        assertThat(result.get(1).getVersionCount(), is(1));
         verify(mockNamespaceStore, atLeastOnce()).namespaceExists(NAMESPACE);
+    }
+
+    @Test
+    public void get_architectures_for_namespace_applies_limit_and_offset_in_memory() throws NamespaceNotFoundException {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        List<Document> architectures = new java.util.ArrayList<>();
+        for (int i = 1; i <= 5; i++) {
+            architectures.add(Document.createDocument()
+                    .put("architectureId", 1000 + i)
+                    .put("name", "Arch " + i)
+                    .put("description", "Architecture " + i)
+                    .put("versions", Document.createDocument().put("1-0-0", "{}")));
+        }
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", architectures);
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Nitrite has no array-slice projection, so the limit/offset window is applied in memory.
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE, new PageRequest(2, 1));
+
+        assertThat(result.size(), is(2));
+        assertThat(result.get(0).getId(), is(1002));
+        assertThat(result.get(1).getId(), is(1003));
+    }
+
+    @Test
+    public void get_architectures_for_namespace_returns_full_list_when_no_limit() throws NamespaceNotFoundException {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Document doc1 = Document.createDocument()
+                .put("architectureId", 1001)
+                .put("name", "Arch One")
+                .put("description", "First")
+                .put("versions", Document.createDocument().put("1-0-0", "{}"));
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", Arrays.asList(doc1));
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE, PageRequest.UNPAGED);
+
+        assertThat(result.size(), is(1));
+        assertThat(result.get(0).getId(), is(1001));
     }
 
     @Test
@@ -183,12 +241,14 @@ public class TestNitriteArchitectureStoreShould {
         when(cursor.firstOrNull()).thenReturn(namespaceDoc);
         when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
 
-        List<NamespaceArchitectureSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> result = architectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         assertThat(result.size(), is(1));
         assertThat(result.get(0).getId(), is(42));
         assertThat(result.get(0).getName(), is("Architecture 42"));
         assertThat(result.get(0).getDescription(), is(""));
+        // Legacy document carries no versions sub-document → count guards to 0.
+        assertThat(result.get(0).getVersionCount(), is(0));
     }
 
     @Test
@@ -362,6 +422,29 @@ public class TestNitriteArchitectureStoreShould {
     }
 
     @Test
+    public void testGetArchitectureVersions_whenVersionsDocumentIsNull_throwsArchitectureNotFoundException() {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Document architectureDoc = Document.createDocument()
+                .put("architectureId", ARCHITECTURE_ID);
+
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", List.of(architectureDoc));
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .build();
+
+        assertThrows(ArchitectureNotFoundException.class, () -> architectureStore.getArchitectureVersions(architecture));
+    }
+
+    @Test
     public void testGetArchitectureForVersion_whenNamespaceDoesNotExist_throwsException() {
         // Arrange
         when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(false);
@@ -428,6 +511,58 @@ public class TestNitriteArchitectureStoreShould {
         // Act & Assert
         assertThrows(ArchitectureVersionNotFoundException.class, () -> architectureStore.getArchitectureForVersion(architecture));
         verify(mockNamespaceStore, atLeastOnce()).namespaceExists(NAMESPACE);
+    }
+
+    @Test
+    public void testGetArchitectureForVersion_whenVersionsDocumentIsNull_throwsArchitectureVersionNotFoundException() {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Document architectureDoc = Document.createDocument()
+                .put("architectureId", ARCHITECTURE_ID);
+
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", List.of(architectureDoc));
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .build();
+
+        assertThrows(ArchitectureVersionNotFoundException.class, () -> architectureStore.getArchitectureForVersion(architecture));
+    }
+
+    @Test
+    public void testGetArchitectureForVersion_whenVersionObjIsNotAString_throwsArchitectureVersionNotFoundException() {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Document versions = Document.createDocument()
+                .put("1-0-0", 12345);
+
+        Document architectureDoc = Document.createDocument()
+                .put("architectureId", ARCHITECTURE_ID)
+                .put("versions", versions);
+
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", List.of(architectureDoc));
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .build();
+
+        assertThrows(ArchitectureVersionNotFoundException.class, () -> architectureStore.getArchitectureForVersion(architecture));
     }
 
     @Test
@@ -558,6 +693,57 @@ public class TestNitriteArchitectureStoreShould {
     }
 
     @Test
+    public void testCreateArchitectureForVersion_whenInvalidJson_throwsJsonParseException() {
+        // Arrange - JSON is validated immediately after the namespace check, before any version/existence lookup
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .setArchitecture("{ not json")
+                .build();
+
+        // Act & Assert
+        assertThrows(JsonParseException.class, () -> architectureStore.createArchitectureForVersion(architecture));
+        verify(mockCollection, never()).update(any(Filter.class), any(Document.class));
+    }
+
+    @Test
+    public void testUpdateArchitectureForVersion_whenInvalidJson_throwsJsonParseException() {
+        // Arrange
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .setArchitecture("{ not json")
+                .build();
+
+        // Act & Assert
+        assertThrows(JsonParseException.class, () -> architectureStore.updateArchitectureForVersion(architecture));
+        verify(mockCollection, never()).update(any(Filter.class), any(Document.class));
+    }
+
+    @Test
+    public void testUpdateArchitectureForVersion_whenNullJson_throwsJsonParseException() {
+        // Arrange - null JSON is rejected by the explicit null guard before any parse/lookup
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .setArchitecture(null)
+                .build();
+
+        // Act & Assert
+        assertThrows(JsonParseException.class, () -> architectureStore.updateArchitectureForVersion(architecture));
+        verify(mockCollection, never()).update(any(Filter.class), any(Document.class));
+    }
+
+    @Test
     public void testVersionExists_whenVersionDoesNotExist_returnsFalse() {
         // Arrange
         when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
@@ -626,6 +812,31 @@ public class TestNitriteArchitectureStoreShould {
         // Act & Assert
         assertThrows(ArchitectureNotFoundException.class, () -> architectureStore.updateArchitectureForVersion(architecture));
         verify(mockNamespaceStore, atLeastOnce()).namespaceExists(NAMESPACE);
+    }
+
+    @Test
+    public void testUpdateArchitectureForVersion_whenVersionsDocumentIsNull_throwsArchitectureNotFoundException() {
+        when(mockNamespaceStore.namespaceExists(NAMESPACE)).thenReturn(true);
+
+        Document architectureDoc = Document.createDocument()
+                .put("architectureId", ARCHITECTURE_ID);
+
+        Document namespaceDoc = Document.createDocument()
+                .put("namespace", NAMESPACE)
+                .put("architectures", List.of(architectureDoc));
+
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(namespaceDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        Architecture architecture = new Architecture.ArchitectureBuilder()
+                .setNamespace(NAMESPACE)
+                .setId(ARCHITECTURE_ID)
+                .setVersion(VERSION)
+                .setArchitecture(VALID_JSON)
+                .build();
+
+        assertThrows(ArchitectureNotFoundException.class, () -> architectureStore.updateArchitectureForVersion(architecture));
     }
 
     @Test

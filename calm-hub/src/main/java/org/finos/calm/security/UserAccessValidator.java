@@ -1,145 +1,145 @@
 package org.finos.calm.security;
 
-import io.netty.util.internal.StringUtil;
 import io.quarkus.arc.profile.IfBuildProfile;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.finos.calm.domain.UserAccess;
-import org.finos.calm.domain.exception.UserAccessNotFoundException;
 import org.finos.calm.store.UserAccessStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Validates whether a user is authorized to access a particular resource based on
- * their assigned permissions and namespaces.
- * <p>
- * This validator is active only when the 'secure' profile is enabled.
- */
+import static org.finos.calm.security.CalmHubPermissionChecker.GLOBAL_ACCESS;
+import static org.finos.calm.security.CalmHubPermissionChecker.ancestorChain;
+
 @ApplicationScoped
-@IfBuildProfile("secure")
+@IfBuildProfile(anyOf = {"secure", "proxy-auth"})
 public class UserAccessValidator {
 
     private static final Logger logger = LoggerFactory.getLogger(UserAccessValidator.class);
 
-    private static final String READ_ACTION = "read";
-    private static final String WRITE_ACTION = "write";
-
     private final UserAccessStore userAccessStore;
 
-    /**
-     * Constructs a new UserAccessValidator with the provided UserAccessStore.
-     *
-     * @param userAccessStore the store used to retrieve user access permissions
-     */
+    @Inject
+    @ConfigProperty(name = "calm.auth.allow-public-read", defaultValue = "false")
+    boolean allowPublicRead;
+
     public UserAccessValidator(UserAccessStore userAccessStore) {
         this.userAccessStore = userAccessStore;
     }
 
     /**
-     * Determines whether the user is authorized to perform an action based on their request attributes.
+     * Returns the set of namespaces the given user can read, or {@link Optional#empty()}
+     * when the user can read all namespaces without restriction.
      *
-     * <p>If the user does not have any access entries or an exception is thrown during validation,
-     * access is denied and the method returns {@code false}.
+     * <p>{@code Optional.empty()} (read everything) is returned when:
+     * <ul>
+     *   <li>{@code calm.auth.allow-public-read=true} — every namespace is publicly readable</li>
+     *   <li>the user holds a {@code GLOBAL admin} grant</li>
+     * </ul>
      *
-     * @param userRequestAttributes encapsulates the HTTP method, username, resource path, and namespace
-     * @return {@code true} if the user is authorized to perform the action; {@code false} otherwise
-     */
-    public boolean isUserAuthorized(UserRequestAttributes userRequestAttributes) {
-        String action = mapHttpMethodToPermission(userRequestAttributes.requestMethod());
-        if (isDefaultAccessibleResource(userRequestAttributes)) {
-            logger.debug("The GET /calm/namespaces endpoint is accessible by default to all authenticated users");
-            return true;
-        }
-        try {
-            return hasAccessForActionOnResource(userRequestAttributes, action);
-        } catch (UserAccessNotFoundException ex) {
-            logger.error("No access permissions assigned to the user: [{}]", userRequestAttributes.username(), ex);
-            return false;
-        }
-    }
-
-    /**
-     * Determines whether the user has sufficient access to perform the specified action
-     * on a resource, based on the user's access grants, request path, and namespace.
+     * <p>Otherwise a namespace is included only if every level in its ancestor chain
+     * has a READ-sufficient grant (own or {@code *}) — the same AND rule enforced by
+     * {@link CalmHubPermissionChecker#canRead}.  An empty {@code Optional.of(Set.of())}
+     * is returned when the user has no grants at all.
      *
-     * @param requestAttributes the user request attributes, including username, request path, and namespace
-     * @param action            the action the user is attempting to perform (e.g., "read", "write".)
-     * @return true if the user has valid access for the action on the requested resource, false otherwise
-     * @throws UserAccessNotFoundException if the user has no associated access records in the system
-     */
-    private boolean hasAccessForActionOnResource(UserRequestAttributes requestAttributes, String action) throws UserAccessNotFoundException {
-        List<UserAccess> userAccesses = userAccessStore.getUserAccessForUsername(requestAttributes.username());
-        return userAccesses.stream().anyMatch(userAccess -> {
-            boolean resourceMatches = (UserAccess.ResourceType.all == userAccess.getResourceType())
-                    || requestAttributes.path().contains(userAccess.getResourceType().name());
-            boolean permissionSufficient = permissionAllows(userAccess.getPermission(), action);
-            boolean namespaceMatches = !StringUtil.isNullOrEmpty(requestAttributes.namespace())
-                    && requestAttributes.namespace().equals(userAccess.getNamespace());
-            return resourceMatches && permissionSufficient && namespaceMatches;
-        });
-    }
-
-    /**
-     * Returns the set of namespaces that the given user has read access to,
-     * based on their access grants. Both read and write permissions grant read access.
+     * <p>{@link UserAccessStore#getGrantsForUser} returns both the user's own grants and
+     * all {@code *} grants in a single query, so the set of candidates is complete.
+     * Any namespace that passes the AND ancestor-chain check here will also pass
+     * {@code canRead}, guaranteeing that search results never trigger a 403 on click-through.
      *
      * @param username the username to check access for
-     * @return a set of namespace names the user can read; empty set if no grants exist
+     * @return {@link Optional#empty()} if the user can read all namespaces; otherwise
+     *         an {@code Optional} containing the specific (possibly empty) set of readable namespaces
      */
-    public Set<String> getReadableNamespaces(String username) {
-        try {
-            List<UserAccess> userAccesses = userAccessStore.getUserAccessForUsername(username);
-            return userAccesses.stream()
-                    .map(UserAccess::getNamespace)
-                    .collect(Collectors.toSet());
-        } catch (UserAccessNotFoundException ex) {
-            logger.debug("No access permissions found for user [{}]", username);
-            return Set.of();
+    public Optional<Set<String>> getReadableNamespaces(String username) {
+        if (allowPublicRead) {
+            logger.debug("calm.auth.allow-public-read is true — all namespaces readable for search");
+            return Optional.empty();
         }
+
+        List<UserAccess> grants = userAccessStore.getGrantsForUser(username);
+
+        if (isGlobalAdmin(grants)) {
+            logger.debug("User [{}] has GLOBAL admin grant — all namespaces readable for search", username);
+            return Optional.empty();
+        }
+
+        if (grants.isEmpty()) {
+            logger.debug("No access grants found for user [{}]", username);
+            return Optional.of(Set.of());
+        }
+
+        // Namespaces covered by at least one READ-sufficient grant (own or *)
+        Set<String> readableGranted = grants.stream()
+                .filter(g -> g.getNamespace() != null && isReadSufficient(g))
+                .map(UserAccess::getNamespace)
+                .collect(Collectors.toSet());
+
+        // Keep only those whose full ancestor chain is also covered
+        return Optional.of(readableGranted.stream()
+                .filter(ns -> ancestorChain(ns).stream().allMatch(readableGranted::contains))
+                .collect(Collectors.toSet()));
     }
 
     /**
-     * Checks whether the request targets a default-accessible endpoint.
+     * Returns the set of domains the given user can read, or {@link Optional#empty()}
+     * when the user can read all domains without restriction.
      *
-     * @param userRequestAttributes the attributes of the incoming user request
-     * @return true if the endpoint is accessible by default, false otherwise
+     * <p>{@code Optional.empty()} (read everything) is returned when:
+     * <ul>
+     *   <li>{@code calm.auth.allow-public-read=true} — every domain is publicly readable</li>
+     *   <li>the user holds a {@code GLOBAL admin} grant</li>
+     * </ul>
+     *
+     * <p>Otherwise a domain is included only if it has a READ-sufficient grant (own or
+     * {@code *}). Domains are flat — there is no ancestor chain — so this mirrors the
+     * READ rule enforced by {@link CalmHubPermissionChecker#canReadByDomain}, including
+     * that {@code *}-username grants count for READ. An empty {@code Optional.of(Set.of())}
+     * is returned when the user has no grants at all.
+     *
+     * @param username the username to check access for
+     * @return {@link Optional#empty()} if the user can read all domains; otherwise
+     *         an {@code Optional} containing the specific (possibly empty) set of readable domains
      */
-    private boolean isDefaultAccessibleResource(UserRequestAttributes userRequestAttributes) {
-        //TODO: How to protect GET - /calm/namespaces endpoint, by maintaining namespace specific user grants.
-        String path = userRequestAttributes.path();
-        String method = userRequestAttributes.requestMethod();
-        return "get".equalsIgnoreCase(method) &&
-                ("/calm/namespaces".equals(path) || "/calm/search".equals(path));
+    public Optional<Set<String>> getReadableDomains(String username) {
+        if (allowPublicRead) {
+            logger.debug("calm.auth.allow-public-read is true — all domains readable for counts");
+            return Optional.empty();
+        }
+
+        List<UserAccess> grants = userAccessStore.getGrantsForUser(username);
+
+        if (isGlobalAdmin(grants)) {
+            logger.debug("User [{}] has GLOBAL admin grant — all domains readable for counts", username);
+            return Optional.empty();
+        }
+
+        if (grants.isEmpty()) {
+            logger.debug("No access grants found for user [{}]", username);
+            return Optional.of(Set.of());
+        }
+
+        return Optional.of(grants.stream()
+                .filter(g -> g.getDomain() != null && isReadSufficient(g))
+                .map(UserAccess::getDomain)
+                .collect(Collectors.toSet()));
     }
 
-    /**
-     * Maps HTTP methods to access permissions.
-     *
-     * @param method the HTTP method
-     * @return "write" for modifying methods, "read" otherwise
-     */
-    private String mapHttpMethodToPermission(String method) {
-        return switch (method) {
-            case "POST", "PUT", "PATCH", "DELETE" -> WRITE_ACTION;
-            default -> READ_ACTION;
-        };
+    private boolean isGlobalAdmin(List<UserAccess> grants) {
+        return grants.stream().anyMatch(g ->
+                GLOBAL_ACCESS.equals(g.getNamespace())
+                        && g.getPermission() == UserAccess.Permission.admin);
     }
 
-    /**
-     * Checks whether the user's permission level allows the requested action.
-     *
-     * @param userPermission  the user's assigned permission
-     * @param requestedAction the action the user is attempting to perform
-     * @return true if the permission is sufficient, false otherwise
-     */
-    private boolean permissionAllows(UserAccess.Permission userPermission, String requestedAction) {
-        return switch (userPermission) {
-            case write -> WRITE_ACTION.equals(requestedAction) || READ_ACTION.equals(requestedAction);
-            case read -> READ_ACTION.equals(requestedAction);
-        };
+    private boolean isReadSufficient(UserAccess grant) {
+        return grant.getPermission() == UserAccess.Permission.read
+                || grant.getPermission() == UserAccess.Permission.write
+                || grant.getPermission() == UserAccess.Permission.admin;
     }
 }

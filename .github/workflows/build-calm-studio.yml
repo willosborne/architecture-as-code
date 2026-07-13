@@ -7,14 +7,16 @@ on:
     pull_request:
         branches: ['main', 'release*']
         paths:
-            - 'calm-suite/calm-studio/**'
+            - 'calm-studio/**'
+            - 'calm-models/**'
             - '.github/workflows/build-calm-studio.yml'
             - 'package.json'
             - 'package-lock.json'
     push:
         branches: ['main', 'release*']
         paths:
-            - 'calm-suite/calm-studio/**'
+            - 'calm-studio/**'
+            - 'calm-models/**'
             - '.github/workflows/build-calm-studio.yml'
             - 'package.json'
             - 'package-lock.json'
@@ -25,12 +27,12 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - name: Setup Node.js
               uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
               with:
-                  node-version: 24
+                  node-version-file: '.nvmrc'
                   cache: npm
                   cache-dependency-path: package-lock.json
 
@@ -39,6 +41,7 @@ jobs:
 
             - name: Build (in dep order)
               run: |
+                  npm run build --if-present --workspace=@finos/calm-models
                   npm run build --if-present --workspace=@calmstudio/calm-core
                   npm run build --if-present --workspace=@calmstudio/extensions
                   npm run build --if-present --workspace=@calmstudio/mcp
@@ -74,12 +77,12 @@ jobs:
         needs: build-lint-test
         steps:
             - name: Checkout
-              uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
             - name: Setup Node.js
               uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
               with:
-                  node-version: 24
+                  node-version-file: '.nvmrc'
                   cache: npm
                   cache-dependency-path: package-lock.json
 
@@ -91,6 +94,7 @@ jobs:
 
             - name: Build
               run: |
+                  npm run build --if-present --workspace=@finos/calm-models
                   npm run build --if-present --workspace=@calmstudio/calm-core
                   npm run build --if-present --workspace=@calmstudio/extensions
                   npm run build --if-present --workspace=@calmstudio/mcp

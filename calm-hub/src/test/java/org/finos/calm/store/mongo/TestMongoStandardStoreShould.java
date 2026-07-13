@@ -23,7 +23,7 @@ import org.finos.calm.domain.exception.StandardNotFoundException;
 import org.finos.calm.domain.exception.StandardVersionExistsException;
 import org.finos.calm.domain.exception.StandardVersionNotFoundException;
 import org.finos.calm.domain.standards.CreateStandardRequest;
-import org.finos.calm.domain.standards.NamespaceStandardSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -113,18 +113,25 @@ public class TestMongoStandardStoreShould {
         standardDetailMap.put("standardId", 55);
         standardDetailMap.put("name", "Test Standard");
         standardDetailMap.put("description", "Test Description");
+        standardDetailMap.put("versions", new Document("1-0-0", new Document()).append("2-0-0", new Document()));
 
         Document doc = new Document(standardDetailMap);
+        // Second standard without a versions sub-document exercises the null-guard → 0.
+        Document docNoVersions = new Document("standardId", 56)
+                .append("name", "No Versions")
+                .append("description", "");
 
         when(documentMock.getList("standards", Document.class))
-                .thenReturn(List.of(doc));
+                .thenReturn(List.of(doc, docNoVersions));
 
-        List<NamespaceStandardSummary> standards = mongoStandardStore.getStandardsForNamespace("finos");
+        List<NamespaceResourceSummary> standards = mongoStandardStore.getStandardsForNamespace("finos");
 
-        assertThat(standards.size(), is(1));
+        assertThat(standards.size(), is(2));
         assertThat(standards.getFirst().getName(), is("Test Standard"));
         assertThat(standards.getFirst().getDescription(), is("Test Description"));
         assertThat(standards.getFirst().getId(), is(55));
+        assertThat(standards.getFirst().getVersionCount(), is(2));
+        assertThat(standards.get(1).getVersionCount(), is(0));
 
         verify(namespaceStore).namespaceExists("finos");
     }
@@ -150,6 +157,17 @@ public class TestMongoStandardStoreShould {
                 .thenReturn(findIterable);
         when(findIterable.projection(any(Bson.class))).thenReturn(findIterable);
         when(findIterable.first()).thenReturn(mainDocument);
+    }
+
+    private void mockSetupStandardDocumentWithoutVersions() {
+        Document standardWithNoVersions = new Document("namespace", "finos")
+                .append("standards", List.of(new Document("standardId", 42)));
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(standardCollection.find(any(Bson.class)))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(standardWithNoVersions);
     }
 
     @Test
@@ -244,6 +262,22 @@ public class TestMongoStandardStoreShould {
         List<String> standardVersions = mongoStandardStore.getStandardVersions("finos", 42);
 
         assertThat(standardVersions, is(List.of("1.0.0")));
+    }
+
+    @Test
+    void throw_standard_not_found_when_versions_document_is_missing_on_get_versions() {
+        mockSetupStandardDocumentWithoutVersions();
+
+        assertThrows(StandardNotFoundException.class,
+                () -> mongoStandardStore.getStandardVersions("finos", 42));
+    }
+
+    @Test
+    void throw_standard_version_not_found_when_versions_document_is_missing_on_get_for_version() {
+        mockSetupStandardDocumentWithoutVersions();
+
+        assertThrows(StandardVersionNotFoundException.class,
+                () -> mongoStandardStore.getStandardForVersion("finos", 42, "1.0.0"));
     }
 
     @Test

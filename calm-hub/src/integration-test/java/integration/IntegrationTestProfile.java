@@ -27,7 +27,9 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
         // equivalent REST PUT endpoint can be exercised by the integration suite.
         return Map.of(
                 "allow.put.operations", "true",
-                "calm.mcp.enabled", "true"
+                "calm.mcp.enabled", "true",
+                "calm.auth.enabled","false",
+                "calm.hub.base-url", "http://localhost:8080"
         );
     }
 }

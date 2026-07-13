@@ -7,6 +7,7 @@ import io.quarkiverse.mcp.server.TextContent;
 import io.quarkiverse.mcp.server.ToolResponse;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.security.TestSecurity;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -40,6 +41,7 @@ import static org.hamcrest.Matchers.not;
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@TestSecurity(authorizationEnabled = false)
 public class MongoMcpIntegration {
 
     private static final Logger logger = LoggerFactory.getLogger(MongoMcpIntegration.class);
@@ -52,7 +54,7 @@ public class MongoMcpIntegration {
             {
                 "unique-id": "mcp-test-decorator",
                 "type": "deployment",
-                "target": ["/calm/namespaces/finos/architectures/1/versions/1-0-0"],
+                "target": ["/api/calm/namespaces/finos/architectures/1/versions/1-0-0"],
                 "target-type": ["architecture"],
                 "applies-to": ["mcp-test-node"],
                 "data": {"status": "deployed", "environment": "integration-test"}
@@ -63,7 +65,7 @@ public class MongoMcpIntegration {
             {
                 "unique-id": "mcp-test-decorator",
                 "type": "deployment",
-                "target": ["/calm/namespaces/finos/architectures/1/versions/1-0-0"],
+                "target": ["/api/calm/namespaces/finos/architectures/1/versions/1-0-0"],
                 "target-type": ["architecture"],
                 "applies-to": ["mcp-test-node"],
                 "data": {"status": "completed", "environment": "integration-test"}
@@ -401,7 +403,7 @@ public class MongoMcpIntegration {
     @Test
     @Order(24)
     void mcp_validation_rejects_decorator_target_filter_with_spaces() {
-        ToolResponse result = decoratorTools.listDecorators("finos", "/calm/namespaces/finos architectures/1", null);
+        ToolResponse result = decoratorTools.listDecorators("finos", "/api/calm/namespaces/finos architectures/1", null);
         assertThat(result.isError(), is(true));
         assertThat(text(result), containsString("Target filter"));
     }

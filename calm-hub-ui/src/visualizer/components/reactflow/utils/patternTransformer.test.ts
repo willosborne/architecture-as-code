@@ -443,6 +443,26 @@ describe('parsePatternData', () => {
         expect(result.nodes[0].id).toBe('node-1');
     });
 
+    it('extracts detailed-architecture from node details schema', () => {
+        const pattern = makePattern([
+            schemaNode('api-gateway', 'API Gateway', 'system', {
+                details: {
+                    properties: {
+                        'detailed-architecture': {
+                            const: '/calm/namespaces/finos/architectures/api-platform/versions/1-0-0',
+                        },
+                    },
+                    required: ['detailed-architecture'],
+                },
+            }),
+        ]);
+        const result = parsePatternData(pattern);
+        const node = result.nodes.find((n) => n.id === 'api-gateway');
+        expect(node?.data.details).toEqual({
+            'detailed-architecture': '/calm/namespaces/finos/architectures/api-platform/versions/1-0-0',
+        });
+    });
+
     it('does not create edges for unknown node references', () => {
         const pattern = makePattern(
             [schemaNode('node-1', 'Node 1', 'service')],
@@ -450,5 +470,52 @@ describe('parsePatternData', () => {
         );
         const result = parsePatternData(pattern);
         expect(result.edges).toHaveLength(0);
+    });
+});
+
+describe('nested container ordering', () => {
+    function deployedInRel(uniqueId: string, container: string, child: string) {
+        return {
+            properties: {
+                'unique-id': { const: uniqueId },
+                'relationship-type': {
+                    const: { 'deployed-in': { container, nodes: [child] } },
+                },
+            },
+        };
+    }
+
+    // A > B > C > system, nested containers listed out of order (A, C, B, system).
+    const pattern = {
+        properties: {
+            nodes: {
+                prefixItems: [
+                    schemaNode('A', 'A', 'system'),
+                    schemaNode('C', 'C', 'system'),
+                    schemaNode('B', 'B', 'system'),
+                    schemaNode('system', 'system', 'service'),
+                ],
+            },
+            relationships: {
+                prefixItems: [
+                    deployedInRel('b-in-a', 'A', 'B'),
+                    deployedInRel('c-in-b', 'B', 'C'),
+                    deployedInRel('s-in-c', 'C', 'system'),
+                ],
+            },
+        },
+    };
+
+    it('emits every parent before its children', () => {
+        const order = parsePatternData(pattern).nodes.map((n) => n.id);
+        const parentOf: Record<string, string> = { B: 'A', C: 'B', system: 'C' };
+        for (const [child, parent] of Object.entries(parentOf)) {
+            expect(order.indexOf(parent)).toBeLessThan(order.indexOf(child));
+        }
+    });
+
+    it('keeps all four nodes', () => {
+        const ids = parsePatternData(pattern).nodes.map((n) => n.id).sort();
+        expect(ids).toEqual(['A', 'B', 'C', 'system']);
     });
 });

@@ -34,46 +34,74 @@ npm run link:cli       # Link CLI globally for testing
 calm --help            # Test globally linked CLI
 
 # Build steps (executed by npm run build)
-npm run copy-calm-schema      # Copy CALM JSON schemas from ../calm/
-npm run copy-docify-templates # Copy docify templates from ../shared/
-npm run copy-widgets          # Copy widget files from ../calm-widgets/
-npm run copy-ai-tools         # Copy AI agent files from ../calm-ai/
+npm run copy-calm-schema         # Copy CALM JSON schemas from ../calm/
+npm run copy-docify-templates    # Copy docify templates from ../shared/
+npm run copy-widgets             # Copy widget files from ../calm-widgets/
+npm run copy-ai-tools            # Copy AI agent files from ../calm-ai/
+npm run copy-workspace-templates # Copy `workspace new` templates from src/command-helpers/workspace/templates/
 ```
 
 ## Architecture Overview
 
 ### Entry Point & Command Structure
-- **Entry**: `src/index.ts` - Sets up Commander.js and registers commands
-- **Commands**: `src/cli.ts` - Main command implementations
-- **Pattern**: Each command is a separate function (generateArchitecture, validateArchitecture, etc.)
+- **Entry**: `src/index.ts` - Thin (~13-line) bin bootstrap. Imports Commander's `program`, calls `setupCLI(program)`, then `program.parseAsync(...)`. No command definitions live here.
+- **Commands**: `src/cli.ts` - Exports `setupCLI(program)`, which registers every command and its options/actions. This is where all command wiring lives.
+- **Pattern**: Each command is registered inline in `setupCLI`; the heavier action logic is dynamically imported from `src/command-helpers/` (see below).
 
 ### Key Commands
 1. **generate** - Generate architecture from CALM pattern
-2. **validate** - Validate architecture against pattern
+2. **validate** - Validate a CALM document (architecture, pattern, and/or timeline) against schemas
 3. **init-ai** - Install AI Assistant support for CALM
 4. **template** - Generate files from Handlebars templates
 5. **docify** - Generate documentation websites (supports `--scaffold` for two-stage workflow)
+6. **diff** - Compare two CALM documents (architectures or patterns), or adjacent/explicit moments of a CALM timeline, and report what changed. Supports `--exit-code` to gate CI on detected changes.
+7. **timeline** - Synthesise an implied CALM timeline from a set of local versioned architecture files (one moment per input).
+8. **init-config** - Create or update the CLI configuration file (`~/.calm.json`), e.g. allowed remote hosts and CALM Hub URL.
+9. **hub** - Command **group** for interacting with CALM Hub. Subcommands:
+   - `hub push <resource> <file>` / `hub pull <resource>` / `hub list <resources>` / `hub create <resource>`
+   - Resources span architectures, patterns, standards, control-requirements, control-configurations, namespaces, and domains (which subcommands exist varies per verb).
+   - `hub push` auto-bumps by default (creates a new version off the latest). The `--fail-if-modified` flag (supported on `architecture`, `pattern`, `standard`, `control-requirement` and `control-configuration`) switches to a strict, non-bumping mode: a brand-new mapping is still created at `1.0.0`, an unchanged document is skipped, and a document that differs from the latest published version fails the push. The local document is normalised the same way Hub stores it (via `updateDocumentMetadata`/`updateControlDocumentMetadata`) before comparing with `canonicalEqual` from `@finos/calm-shared`, so a version-only or defaulted-field difference is not mistaken for a content change.
+10. **workspace** - Command **group** for a local, git-rooted bundle of CALM documents (`.calm-workspace/`). Subcommands include `init`, `add`, `rm`, `new`, `tree`, `list`, `show`, `switch`, `clean`, and the CalmHub sync trio:
+    - `workspace push` — pushes the exact version each document's `$id` declares (no auto-bump). An existing version with unchanged content is skipped; `--fail-if-modified` (or `push.failIfModified: true` in `.calm-workspace/config.json`) fails when a document already published at its declared version has changed on disk, for strict merge-time CI.
+    - `workspace check` — CI/PR gate: exits non-zero if any tracked document changed on disk relative to CalmHub but wasn't version-bumped.
+    - `workspace bump` — bumps changed documents (default MINOR; `--major`/`--patch`; or `bump.defaultIncrement` in config) and repoints all references to the new `$id`s. Idempotent: re-bumping an already-bumped doc is a no-op until it's pushed.
+    - `workspace rm [id]` — removes a document from the active workspace manifest; prompts interactively for the id if omitted.
+    - Central config `.calm-workspace/config.json` holds `push.failIfModified` (`true`|`false`) and `bump.defaultIncrement` (`MAJOR`|`MINOR`|`PATCH`).
 
 ### Important Directories
 ```
 src/
-├── cli.ts                    # Main command implementations
-├── cli-config.ts             # Configuration helpers
-├── index.ts                  # Entry point
-├── command-helpers/          # Shared utilities for commands
+├── cli.ts                    # setupCLI: registers all commands, options, and actions
+├── cli-config.ts             # Configuration helpers (~/.calm.json loading/saving)
+├── index.ts                  # Thin bin bootstrap (calls setupCLI + parseAsync)
+├── command-helpers/          # Action logic for commands (see below)
 └── test_helpers/             # Test utilities
 ```
+
+The `command-helpers/` directory now holds the substantial per-command logic that
+`cli.ts` dynamically imports:
+- `diff.ts` - document and timeline diffing
+- `timeline.ts` - timeline synthesis
+- `hub-commands.ts` - CALM Hub push/pull/list/create implementations
+- `hub-output.ts` - formatting of Hub command output
+- `template.ts` - template processing helpers (e.g. URL-to-local-file mapping)
+- `validate.ts` - validation option checks and execution
+- `generate-options.ts` - interactive/option-choice handling for `generate`
+- `ai-tools.ts` - `init-ai` provider setup
 
 ### Build Artifacts
 After `npm run build`, the `dist/` directory contains:
 ```
 dist/
 ├── index.js              # Compiled CLI entry point (bin)
-├── calm/release/         # Copied CALM schemas
+├── calm/                 # Copied CALM meta schemas only (release + draft **/meta/* files)
 ├── calm-ai/              # Copied AI agent files
 ├── template-bundles/     # Copied docify templates
-└── cli/widgets/          # Copied widget files
+└── widgets/              # Copied widget files (copy-widgets uses --up 4)
 ```
+
+Note: `copy-calm-schema` only bundles `**/meta/*` files (not every CALM schema)
+into `dist/calm/`.
 
 ## Key Concepts
 
@@ -88,7 +116,7 @@ dist/
 - Supports both file paths and URLs for pattern/architecture files
 
 ### Verbose Mode
-- All commands support `-v, --verbose` flag
+- Most top-level commands support `-v, --verbose` (generate, validate, template, docify, init-ai, diff, timeline). `init-config` and the `hub` subcommands do not.
 - Use for debugging command execution
 
 ### Configuration

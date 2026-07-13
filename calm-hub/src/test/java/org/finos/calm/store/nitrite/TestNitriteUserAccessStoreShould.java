@@ -57,7 +57,6 @@ public class TestNitriteUserAccessStoreShould {
                 .setNamespace("finos")
                 .setUsername("testuser")
                 .setPermission(UserAccess.Permission.read)
-                .setResourceType(UserAccess.ResourceType.patterns)
                 .build();
         userAccess.setCreationDateTime(LocalDateTime.now());
         userAccess.setUpdateDateTime(LocalDateTime.now());
@@ -83,13 +82,46 @@ public class TestNitriteUserAccessStoreShould {
                 .setNamespace("nonexistent")
                 .setUsername("testuser")
                 .setPermission(UserAccess.Permission.read)
-                .setResourceType(UserAccess.ResourceType.patterns)
                 .build();
 
         when(mockNamespaceStore.namespaceExists("nonexistent")).thenReturn(false);
 
         // Act & Assert
         assertThrows(NamespaceNotFoundException.class, () -> userAccessStore.createUserAccessForNamespace(userAccess));
+    }
+
+    @Test
+    public void getGrantsForUser_returns_empty_list_when_no_grants_exist() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        List<UserAccess> result = userAccessStore.getGrantsForUser("alice");
+        assertThat(result, hasSize(0));
+    }
+
+    @Test
+    public void getGrantsForUser_returns_user_and_wildcard_grants() {
+        Document userDoc = mock(Document.class);
+        when(userDoc.get("username", String.class)).thenReturn("alice");
+        when(userDoc.get("namespace", String.class)).thenReturn("org");
+        when(userDoc.get("domain", String.class)).thenReturn(null);
+        when(userDoc.get("permission", String.class)).thenReturn("write");
+        when(userDoc.get("userAccessId", Integer.class)).thenReturn(1);
+
+        Document wildcardDoc = mock(Document.class);
+        when(wildcardDoc.get("username", String.class)).thenReturn("*");
+        when(wildcardDoc.get("namespace", String.class)).thenReturn("org.ab");
+        when(wildcardDoc.get("domain", String.class)).thenReturn(null);
+        when(wildcardDoc.get("permission", String.class)).thenReturn("read");
+        when(wildcardDoc.get("userAccessId", Integer.class)).thenReturn(2);
+
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(List.of(userDoc, wildcardDoc).iterator());
+
+        List<UserAccess> result = userAccessStore.getGrantsForUser("alice");
+        assertThat(result, hasSize(2));
+        assertThat(result.stream().map(UserAccess::getUsername).toList(),
+                containsInAnyOrder("alice", "*"));
     }
 
     @Test
@@ -101,8 +133,8 @@ public class TestNitriteUserAccessStoreShould {
         
         when(mockDoc.get("username", String.class)).thenReturn("testuser");
         when(mockDoc.get("namespace", String.class)).thenReturn("finos");
+        when(mockDoc.get("domain", String.class)).thenReturn(null);
         when(mockDoc.get("permission", String.class)).thenReturn("read");
-        when(mockDoc.get("resourceType", String.class)).thenReturn("patterns");
         when(mockDoc.get("userAccessId", Integer.class)).thenReturn(1);
 
         // Act
@@ -134,8 +166,8 @@ public class TestNitriteUserAccessStoreShould {
         
         when(mockDoc.get("username", String.class)).thenReturn("testuser");
         when(mockDoc.get("namespace", String.class)).thenReturn("finos");
+        when(mockDoc.get("domain", String.class)).thenReturn(null);
         when(mockDoc.get("permission", String.class)).thenReturn("read");
-        when(mockDoc.get("resourceType", String.class)).thenReturn("patterns");
         when(mockDoc.get("userAccessId", Integer.class)).thenReturn(1);
 
         // Act
@@ -165,8 +197,8 @@ public class TestNitriteUserAccessStoreShould {
         
         when(mockDoc.get("username", String.class)).thenReturn("testuser");
         when(mockDoc.get("namespace", String.class)).thenReturn("finos");
+        when(mockDoc.get("domain", String.class)).thenReturn(null);
         when(mockDoc.get("permission", String.class)).thenReturn("read");
-        when(mockDoc.get("resourceType", String.class)).thenReturn("patterns");
         when(mockDoc.get("userAccessId", Integer.class)).thenReturn(1);
 
         // Act
@@ -187,5 +219,182 @@ public class TestNitriteUserAccessStoreShould {
 
         // Act & Assert
         assertThrows(UserAccessNotFoundException.class, () -> userAccessStore.getUserAccessForNamespaceAndId("finos", 1));
+    }
+
+    @Test
+    public void testCreateUserAccessForDomain() {
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setDomain("payments")
+                .setUsername("testuser")
+                .setPermission(UserAccess.Permission.write)
+                .build();
+        userAccess.setCreationDateTime(java.time.LocalDateTime.now());
+        userAccess.setUpdateDateTime(java.time.LocalDateTime.now());
+
+        when(mockCounterStore.getNextUserAccessSequenceValue()).thenReturn(2);
+
+        UserAccess result = userAccessStore.createUserAccessForDomain(userAccess);
+
+        assertThat(result, is(notNullValue()));
+        assertThat(result.getUserAccessId(), is(2));
+        assertThat(result.getDomain(), is("payments"));
+        assertThat(result.getUsername(), is("testuser"));
+        verify(mockCollection).insert(any(Document.class));
+    }
+
+    @Test
+    public void testGetUserAccessForDomain() throws UserAccessNotFoundException {
+        Document mockDoc = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.singletonList(mockDoc).iterator());
+
+        when(mockDoc.get("username", String.class)).thenReturn("testuser");
+        when(mockDoc.get("namespace", String.class)).thenReturn(null);
+        when(mockDoc.get("domain", String.class)).thenReturn("payments");
+        when(mockDoc.get("permission", String.class)).thenReturn("write");
+        when(mockDoc.get("userAccessId", Integer.class)).thenReturn(2);
+
+        List<UserAccess> result = userAccessStore.getUserAccessForDomain("payments");
+
+        assertThat(result, hasSize(1));
+        assertThat(result.getFirst().getDomain(), is("payments"));
+    }
+
+    @Test
+    public void testGetUserAccessForDomain_ReturnsEmptyListWhenNotFound() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        assertThat(userAccessStore.getUserAccessForDomain("payments"), hasSize(0));
+    }
+
+    @Test
+    public void testGetUserAccessForDomainAndId() throws UserAccessNotFoundException {
+        Document mockDoc = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(mockDoc);
+
+        when(mockDoc.get("username", String.class)).thenReturn("testuser");
+        when(mockDoc.get("namespace", String.class)).thenReturn(null);
+        when(mockDoc.get("domain", String.class)).thenReturn("payments");
+        when(mockDoc.get("permission", String.class)).thenReturn("write");
+        when(mockDoc.get("userAccessId", Integer.class)).thenReturn(2);
+
+        UserAccess result = userAccessStore.getUserAccessForDomainAndId("payments", 2);
+
+        assertThat(result, is(notNullValue()));
+        assertThat(result.getDomain(), is("payments"));
+        assertThat(result.getUserAccessId(), is(2));
+    }
+
+    @Test
+    public void testGetUserAccessForDomainAndId_ThrowsExceptionWhenNotFound() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(null);
+
+        assertThrows(UserAccessNotFoundException.class, () -> userAccessStore.getUserAccessForDomainAndId("payments", 2));
+    }
+
+    @Test
+    public void deleteUserAccessForNamespace_removesDocumentAndSucceeds() throws Exception {
+        Document mockDoc = mock(Document.class);
+        when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(mockDoc);
+
+        userAccessStore.deleteUserAccessForNamespace("finos", 1);
+
+        verify(mockCollection).remove(mockDoc);
+    }
+
+    @Test
+    public void deleteUserAccessForNamespace_throwsNamespaceNotFoundException_whenNamespaceDoesNotExist() {
+        when(mockNamespaceStore.namespaceExists("nonexistent")).thenReturn(false);
+
+        assertThrows(NamespaceNotFoundException.class,
+                () -> userAccessStore.deleteUserAccessForNamespace("nonexistent", 1));
+        verify(mockCollection, never()).remove(any(Document.class));
+    }
+
+    @Test
+    public void deleteUserAccessForNamespace_throwsUserAccessNotFoundException_whenGrantDoesNotExist() {
+        when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(null);
+
+        assertThrows(UserAccessNotFoundException.class,
+                () -> userAccessStore.deleteUserAccessForNamespace("finos", 999));
+        verify(mockCollection, never()).remove(any(Document.class));
+    }
+
+    @Test
+    public void testGetUserAccessForNamespace_ReturnsEmptyListWhenNoGrantsExist() throws Exception {
+        when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        assertThat(userAccessStore.getUserAccessForNamespace("finos"), hasSize(0));
+    }
+
+    @Test
+    public void deleteUserAccessForDomain_removesDocumentAndSucceeds() throws Exception {
+        Document mockDoc = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(mockDoc);
+
+        userAccessStore.deleteUserAccessForDomain("payments", 201);
+
+        verify(mockCollection).remove(mockDoc);
+    }
+
+    @Test
+    public void deleteUserAccessForDomain_throwsUserAccessNotFoundException_whenGrantDoesNotExist() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(null);
+
+        assertThrows(UserAccessNotFoundException.class,
+                () -> userAccessStore.deleteUserAccessForDomain("payments", 999));
+        verify(mockCollection, never()).remove(any(Document.class));
+    }
+
+    @Test
+    public void createUserAccessForNamespace_succeedsForGlobalWithoutNamespaceExistenceCheck() throws NamespaceNotFoundException {
+        when(mockCounterStore.getNextUserAccessSequenceValue()).thenReturn(303);
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setNamespace("GLOBAL")
+                .setUsername("alice")
+                .setPermission(UserAccess.Permission.admin)
+                .build();
+
+        UserAccess result = userAccessStore.createUserAccessForNamespace(userAccess);
+
+        assertThat(result.getUserAccessId(), is(303));
+        assertThat(result.getNamespace(), is("GLOBAL"));
+        verify(mockNamespaceStore, never()).namespaceExists("GLOBAL");
+        verify(mockCollection).insert(any(Document.class));
+    }
+
+    @Test
+    public void getUserAccessForNamespace_succeedsForGlobalWithoutNamespaceExistenceCheck() throws NamespaceNotFoundException {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        List<UserAccess> result = userAccessStore.getUserAccessForNamespace("GLOBAL");
+
+        assertThat(result, hasSize(0));
+        verify(mockNamespaceStore, never()).namespaceExists("GLOBAL");
+    }
+
+    @Test
+    public void deleteUserAccessForNamespace_succeedsForGlobalWithoutNamespaceExistenceCheck() throws Exception {
+        Document mockDoc = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.firstOrNull()).thenReturn(mockDoc);
+
+        userAccessStore.deleteUserAccessForNamespace("GLOBAL", 303);
+
+        verify(mockNamespaceStore, never()).namespaceExists("GLOBAL");
+        verify(mockCollection).remove(mockDoc);
     }
 }

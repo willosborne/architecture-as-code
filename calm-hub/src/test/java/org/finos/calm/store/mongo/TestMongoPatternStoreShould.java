@@ -23,7 +23,8 @@ import org.finos.calm.domain.exception.PatternNotFoundException;
 import org.finos.calm.domain.exception.PatternVersionExistsException;
 import org.finos.calm.domain.exception.PatternVersionNotFoundException;
 import org.finos.calm.domain.pattern.CreatePatternRequest;
-import org.finos.calm.domain.pattern.NamespacePatternSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
+import org.finos.calm.store.PageRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -112,22 +113,74 @@ public class TestMongoPatternStoreShould {
         Document documentMock = Mockito.mock(Document.class);
         when(findIterable.first()).thenReturn(documentMock);
 
-        Document doc1 = new Document("patternId", 1001).append("name", "Pattern One").append("description", "First pattern");
-        Document doc2 = new Document("patternId", 1002).append("name", "Pattern Two").append("description", "Second pattern");
+        Document doc1 = new Document("patternId", 1001).append("name", "Pattern One").append("description", "First pattern")
+                .append("versions", new Document("1-0-0", new Document()).append("2-0-0", new Document()));
+        Document doc2 = new Document("patternId", 1002).append("name", "Pattern Two").append("description", "Second pattern")
+                .append("versions", new Document("1-0-0", new Document()));
 
         when(documentMock.getList("patterns", Document.class))
                 .thenReturn(Arrays.asList(doc1, doc2));
 
-        List<NamespacePatternSummary> patterns = mongoPatternStore.getPatternsForNamespace("finos");
+        List<NamespaceResourceSummary> patterns = mongoPatternStore.getPatternsForNamespace("finos");
 
         assertThat(patterns.size(), is(2));
         assertThat(patterns.get(0).getName(), is("Pattern One"));
         assertThat(patterns.get(0).getDescription(), is("First pattern"));
         assertThat(patterns.get(0).getId(), is(1001));
+        assertThat(patterns.get(0).getVersionCount(), is(2));
         assertThat(patterns.get(1).getName(), is("Pattern Two"));
         assertThat(patterns.get(1).getDescription(), is("Second pattern"));
         assertThat(patterns.get(1).getId(), is(1002));
+        assertThat(patterns.get(1).getVersionCount(), is(1));
         verify(namespaceStore).namespaceExists("finos");
+    }
+
+    @Test
+    void get_patterns_for_namespace_applies_slice_projection_when_limit_provided() throws NamespaceNotFoundException {
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(patternCollection.find(eq(Filters.eq("namespace", "finos"))))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any())).thenReturn(findIterable);
+        Document documentMock = Mockito.mock(Document.class);
+        when(findIterable.first()).thenReturn(documentMock);
+        when(documentMock.getList("patterns", Document.class)).thenReturn(new ArrayList<>());
+
+        mongoPatternStore.getPatternsForNamespace("finos", new PageRequest(3, 6));
+
+        // The limit/offset is pushed down to Mongo as a $slice projection on the patterns array,
+        // rather than being sliced in memory after loading the whole namespace document.
+        verify(findIterable).projection(eq(Projections.slice("patterns", 6, 3)));
+    }
+
+    @Test
+    void get_patterns_for_namespace_clamps_a_negative_offset_to_zero() throws NamespaceNotFoundException {
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(patternCollection.find(eq(Filters.eq("namespace", "finos"))))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any())).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        mongoPatternStore.getPatternsForNamespace("finos", new PageRequest(3, -5));
+
+        // A negative offset is clamped to 0 rather than passed to $slice, which Mongo would otherwise
+        // interpret as "count from the end" — matching the in-memory Nitrite path.
+        verify(findIterable).projection(eq(Projections.slice("patterns", 0, 3)));
+    }
+
+    @Test
+    void get_patterns_for_namespace_does_not_project_when_no_limit_provided() throws NamespaceNotFoundException {
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(patternCollection.find(eq(Filters.eq("namespace", "finos"))))
+                .thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        mongoPatternStore.getPatternsForNamespace("finos", PageRequest.UNPAGED);
+
+        // No limit → full list → no $slice projection (unchanged behaviour).
+        verify(findIterable, times(0)).projection(any());
     }
 
     @Test
@@ -145,12 +198,14 @@ public class TestMongoPatternStoreShould {
         when(documentMock.getList("patterns", Document.class))
                 .thenReturn(List.of(legacyDoc));
 
-        List<NamespacePatternSummary> patterns = mongoPatternStore.getPatternsForNamespace("finos");
+        List<NamespaceResourceSummary> patterns = mongoPatternStore.getPatternsForNamespace("finos");
 
         assertThat(patterns.size(), is(1));
         assertThat(patterns.get(0).getName(), is("Pattern 99"));
         assertThat(patterns.get(0).getDescription(), is(""));
         assertThat(patterns.get(0).getId(), is(99));
+        // Legacy document carries no versions sub-document → count guards to 0.
+        assertThat(patterns.get(0).getVersionCount(), is(0));
     }
 
     private DocumentFindIterable setupInvalidPattern() {
@@ -251,6 +306,38 @@ public class TestMongoPatternStoreShould {
 
         verify(patternCollection).find(new Document("namespace", pattern.getNamespace()));
         verify(findIterable).projection(Projections.fields(Projections.include("patterns")));
+    }
+
+    @Test
+    void throw_pattern_not_found_when_versions_document_is_missing_on_get_versions() {
+        Document patternWithNoVersions = new Document("namespace", "finos")
+                .append("patterns", List.of(new Document("patternId", 42)));
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(patternCollection.find(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.projection(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(patternWithNoVersions);
+
+        Pattern pattern = new Pattern.PatternBuilder().setNamespace("finos").setId(42).build();
+
+        assertThrows(PatternNotFoundException.class,
+                () -> mongoPatternStore.getPatternVersions(pattern));
+    }
+
+    @Test
+    void throw_pattern_version_not_found_when_versions_document_is_missing_on_get_for_version() {
+        Document patternWithNoVersions = new Document("namespace", "finos")
+                .append("patterns", List.of(new Document("patternId", 42)));
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(patternCollection.find(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.projection(any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(patternWithNoVersions);
+
+        Pattern pattern = new Pattern.PatternBuilder().setNamespace("finos").setId(42).setVersion("1.0.0").build();
+
+        assertThrows(PatternVersionNotFoundException.class,
+                () -> mongoPatternStore.getPatternForVersion(pattern));
     }
 
     @Test

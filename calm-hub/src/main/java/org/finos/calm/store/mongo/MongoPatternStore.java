@@ -12,12 +12,14 @@ import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.Pattern;
+import org.finos.calm.store.util.VersionKeySelector;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.exception.PatternNotFoundException;
 import org.finos.calm.domain.exception.PatternVersionExistsException;
 import org.finos.calm.domain.exception.PatternVersionNotFoundException;
 import org.finos.calm.domain.pattern.CreatePatternRequest;
-import org.finos.calm.domain.pattern.NamespacePatternSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
+import org.finos.calm.store.PageRequest;
 import org.finos.calm.store.PatternStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,12 +59,16 @@ public class MongoPatternStore implements PatternStore {
     }
 
     @Override
-    public List<NamespacePatternSummary> getPatternsForNamespace(String namespace) throws NamespaceNotFoundException {
+    public List<NamespaceResourceSummary> getPatternsForNamespace(String namespace, PageRequest page) throws NamespaceNotFoundException {
         if(!namespaceStore.namespaceExists(namespace)) {
             throw new NamespaceNotFoundException();
         }
 
-        Document namespaceDocument = patternCollection.find(Filters.eq("namespace", namespace)).first();
+        // When paged, the window is pushed down to Mongo via a $slice projection so only the requested
+        // slice of the patterns array is returned rather than the whole list. Unpaged → no projection →
+        // full list (unchanged behaviour). See MongoResourceSlice.
+        Bson filter = Filters.eq("namespace", namespace);
+        Document namespaceDocument = MongoResourceSlice.findNamespaceDoc(patternCollection, filter, "patterns", page);
 
         //protects from an unpopulated mongo collection
         if(namespaceDocument == null || namespaceDocument.isEmpty()) {
@@ -70,7 +76,7 @@ public class MongoPatternStore implements PatternStore {
         }
 
         List<Document> patterns = namespaceDocument.getList("patterns", Document.class);
-        List<NamespacePatternSummary> patternSummaries = new ArrayList<>();
+        List<NamespaceResourceSummary> patternSummaries = new ArrayList<>();
 
         for (Document pattern : patterns) {
             Integer patternId = pattern.getInteger("patternId");
@@ -78,7 +84,10 @@ public class MongoPatternStore implements PatternStore {
             String description = pattern.getString("description");
             if (name == null) name = "Pattern " + patternId;
             if (description == null) description = "";
-            patternSummaries.add(new NamespacePatternSummary(name, description, patternId));
+            // Count versions from the already-in-memory sub-document (O(1), no extra query).
+            Object rawVersions = pattern.get("versions");
+            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.keySet() : null);
+            patternSummaries.add(new NamespaceResourceSummary(name, description, patternId, versionCount));
         }
 
         return patternSummaries;
@@ -125,6 +134,9 @@ public class MongoPatternStore implements PatternStore {
             if (pattern.getId() == patternDoc.getInteger("patternId")) {
                 // Extract the versions map from the matching pattern
                 Document versions = (Document) patternDoc.get("versions");
+                if (versions == null) {
+                    throw new PatternNotFoundException();
+                }
                 Set<String> versionKeys = versions.keySet();
 
                 //Convert from Mongo representation
@@ -165,6 +177,9 @@ public class MongoPatternStore implements PatternStore {
             if (pattern.getId() == patternDoc.getInteger("patternId")) {
                 // Retrieve the versions map from the matching pattern
                 Document versions = (Document) patternDoc.get("versions");
+                if (versions == null) {
+                    throw new PatternVersionNotFoundException();
+                }
 
                 // Return the pattern JSON blob for the specified version
                 Document versionDoc = (Document) versions.get(pattern.getMongoVersion());

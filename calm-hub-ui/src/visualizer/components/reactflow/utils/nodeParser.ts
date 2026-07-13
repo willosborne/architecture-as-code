@@ -63,7 +63,7 @@ function createSystemNode(
             label: node.name || id,
             ...node,
         },
-        ...(parentId && { parentId, expandParent: true }),
+        ...(parentId && { parentId }),
     };
 }
 
@@ -86,7 +86,7 @@ function createRegularNode(
             ...node,
             onShowDetails: onShowDetailsCallback,
         },
-        ...(parentId && { parentId, expandParent: true }),
+        ...(parentId && { parentId }),
     };
 }
 
@@ -112,15 +112,13 @@ export function parseNodes(
 
     nodes.forEach((node) => {
         const id = node['unique-id'];
-        const nodeType = node['node-type'];
 
         if (!id) return;
 
         const isContainer = containerNodeIds.has(id);
-        const isSystemNode = nodeType === 'system' || isContainer;
         const parentId = parentMap.get(id);
 
-        if (isSystemNode) {
+        if (isContainer) {
             systemNodes.push(createSystemNode(node, parentId));
         } else {
             regularNodes.push(createRegularNode(node, parentId, onShowDetailsCallback));

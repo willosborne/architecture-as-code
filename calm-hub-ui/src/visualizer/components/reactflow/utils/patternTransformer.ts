@@ -1,5 +1,11 @@
 import { Node, Edge } from 'reactflow';
-import { getLayoutedElements, createTopLevelLayout } from './layoutUtils';
+import {
+    getLayoutedElements,
+    createTopLevelLayout,
+    calculateChildBounds,
+    sortContainersDeepestFirst,
+    sortNodesParentsBeforeChildren,
+} from './layoutUtils';
 import { createEdge } from './edgeFactory';
 import { GRAPH_LAYOUT } from './constants';
 import { THEME } from '../theme';
@@ -121,6 +127,14 @@ function extractPatternControls(item: SchemaObject): SchemaObject | undefined {
 
 // ---- Node extraction ----
 
+function extractPatternDetails(item: SchemaObject): { 'detailed-architecture': string } | undefined {
+    const detailsSchema = item['properties']?.['details'];
+    if (!detailsSchema) return undefined;
+    const detailedArch = detailsSchema['properties']?.['detailed-architecture']?.['const'];
+    if (!detailedArch) return undefined;
+    return { 'detailed-architecture': String(detailedArch) };
+}
+
 interface ExtractedNode {
     uniqueId: string;
     name: string;
@@ -128,6 +142,7 @@ interface ExtractedNode {
     description: string;
     interfaces?: SchemaObject[];
     controls?: SchemaObject;
+    details?: { 'detailed-architecture': string };
     decisionGroupId?: string;
 }
 
@@ -141,6 +156,7 @@ function extractNodeFromSchemaItem(item: SchemaObject): ExtractedNode | null {
         description: readSchemaValue(item, 'description') || '',
         interfaces: extractInterfaces(item),
         controls: extractPatternControls(item),
+        details: extractPatternDetails(item),
     };
 }
 
@@ -414,6 +430,7 @@ function createReactFlowNodes(
         };
         if (node.interfaces) data['interfaces'] = node.interfaces;
         if (node.controls) data['controls'] = node.controls;
+        if (node.details) data['details'] = node.details;
         return data;
     }
 
@@ -427,7 +444,7 @@ function createReactFlowNodes(
                 position: { x: 0, y: 0 },
                 style: { zIndex: -1 },
                 data: buildNodeData(node),
-                ...(existingParentId && { parentId: existingParentId, expandParent: true }),
+                ...(existingParentId && { parentId: existingParentId }),
             });
         }
     });
@@ -444,7 +461,7 @@ function createReactFlowNodes(
             type: 'custom',
             position: { x: 0, y: 0 },
             data: buildNodeData(node),
-            ...(parentId && { parentId, expandParent: true }),
+            ...(parentId && { parentId }),
         });
     });
 
@@ -539,8 +556,10 @@ function applyPatternLayout(regularNodes: Node[], groupNodes: Node[], edges: Edg
         }
     });
 
-    // Layout children within each group node
-    groupNodes.forEach((groupNode) => {
+    // Layout children within each group node, deepest-nested containers first
+    // so that an outer container is sized once its inner container children
+    // already know their own dimensions.
+    sortContainersDeepestFirst(groupNodes).forEach((groupNode) => {
         const childNodes = nodesWithParents.filter((n) => n.parentId === groupNode.id);
         if (childNodes.length > 0) {
             const groupEdges = edges.filter(
@@ -593,32 +612,13 @@ function applyPatternLayout(regularNodes: Node[], groupNodes: Node[], edges: Edg
         if (pos) node.position = pos;
     });
 
-    const allNodes = [
+    const allNodes = sortNodesParentsBeforeChildren([
         ...topLevelGroupNodes,
         ...nodesWithoutParents.filter((n) => !groupNodes.includes(n)),
         ...nodesWithParents,
-    ];
+    ]);
 
     return { nodes: allNodes, edges };
-}
-
-function calculateChildBounds(children: Node[]): { minX: number; minY: number; maxX: number; maxY: number } {
-    const nodeWidth = GRAPH_LAYOUT.NODE_WIDTH;
-    const nodeHeight = GRAPH_LAYOUT.NODE_HEIGHT;
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    children.forEach((child) => {
-        minX = Math.min(minX, child.position.x);
-        minY = Math.min(minY, child.position.y);
-        maxX = Math.max(maxX, child.position.x + nodeWidth);
-        maxY = Math.max(maxY, child.position.y + nodeHeight);
-    });
-
-    return { minX, minY, maxX, maxY };
 }
 
 // ---- Public API ----

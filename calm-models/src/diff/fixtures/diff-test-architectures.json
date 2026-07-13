@@ -62,7 +62,20 @@
           }
         }
       }
-    ]
+    ],
+    "adrs": [
+      "https://example.com/adr/001-use-api-gateway",
+      "https://example.com/adr/002-use-load-balancer"
+    ],
+    "controls": {
+      "id-1": {
+        "description": "test control description",
+        "requirements": [{
+          "requirement-url": "https://url",
+          "config-url": "https://config-url"
+        }]
+      }
+    }
   },
   "additionArchitecture": {
     "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
@@ -760,5 +773,128 @@
         }
       }
     ]
+  },
+  "adrAdditionArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests ADR addition",
+      "description": "Adds a new ADR to the base architecture to test ADR diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "adrs": [
+      "https://example.com/adr/001-use-api-gateway",
+      "https://example.com/adr/002-use-load-balancer",
+      "https://example.com/adr/003-choose-database"
+    ]
+  },
+  "adrRemovalArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests ADR removal",
+      "description": "Removes an ADR from the base architecture to test ADR diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "adrs": [
+      "https://example.com/adr/002-use-load-balancer"
+    ]
+  },
+  "adrModificationArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests ADR array modification",
+      "description": "Modifies an ADR in the base architecture to test ADR diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "adrs": [
+      "https://example.com/adr/001-use-api-gateway-per-app",
+      "https://example.com/adr/002-use-load-balancer"
+    ]
+  },
+  "adrReorderArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests ADR array reordering",
+      "description": "Reorders the ADR array with respect to the base architecture to test ADR diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "adrs": [
+      "https://example.com/adr/002-use-load-balancer",
+      "https://example.com/adr/001-use-api-gateway"
+    ]
+  },
+  "controlAdditionArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests control addition",
+      "description": "Adds a new control, mapped to from a new control id, to test control diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "controls": {
+      "id-1": {
+        "description": "test control description",
+        "requirements": [{
+          "requirement-url": "https://url",
+          "config-url": "https://config-url"
+        }]
+      },
+      "id-2": {
+        "description": "test control description 2",
+        "requirements": [{
+          "requirement-url": "https://new-url",
+          "config-url": "https://new-config-url"
+        }]
+      }
+    }
+  },
+  "controlRemovalArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests control addition",
+      "description": "Adds a new control, mapped to from a new control id, to test control diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "controls": {}
+  },
+  "controlSimultaneousAddAndRemovalArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests control addition",
+      "description": "Adds a new control, mapped to from a new control id, to test control diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "controls": {
+      "id-2": {
+        "description": "test control description 2",
+        "requirements": [{
+          "requirement-url": "https://new-url",
+          "config-url": "https://new-config-url"
+        }]
+      }
+    }
+  },
+  "controlEditArchitecture": {
+    "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+    "metadata": {
+      "test-purpose": "Tests control addition",
+      "description": "Adds a new control, mapped to from a new control id, to test control diffing"
+    },
+    "nodes": [],
+    "relationships": [],
+    "controls": {
+      "id-1": {
+        "description": "edited content",
+        "requirements": [{
+          "requirement-url": "https://updated-url",
+          "config-url": "https://updated-config-url"
+        }]
+      }
+    }
   }
 }
