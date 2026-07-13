@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { MemoryRouter, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import Hub from './Hub.js';
 import { vi, describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { authStore } from '../service/utils/auth-store.js';
@@ -131,10 +131,44 @@ vi.mock('../components/navbar/Navbar', () => ({
     Navbar: () => <nav data-testid="navbar">Navbar</nav>,
 }));
 
-vi.mock('./components/diagram-section/DiagramSection', () => ({
-    DiagramSection: ({ data, onItemSelect }: { data: { id?: string }; onItemSelect?: (item: { data: unknown }) => void }) => (
+vi.mock('./components/diagram-section/DiagramSection', async () => {
+    // Real context, not a mock: the stub consumes Hub's provider exactly like the
+    // production tree (CustomNode / NodeDetails) does.
+    const { useDiagramActions } = await import('../visualizer/context/DiagramActionsContext.js');
+    const DiagramSection = ({
+        data,
+        onItemSelect,
+        breadcrumbs,
+        onDisplayNameChange,
+    }: {
+        data: { id?: string };
+        onItemSelect?: (item: { data: unknown }) => void;
+        breadcrumbs?: unknown[];
+        onDisplayNameChange?: (name: string | undefined) => void;
+    }) => {
+        const { onNavigateToDetailedArch } = useDiagramActions();
+        return (
         <div data-testid="diagram-section">
             Diagram: {data?.id}
+            {/* Trail from history state, echoed for breadcrumb-accumulation tests. */}
+            <div data-testid="breadcrumbs">{JSON.stringify(breadcrumbs ?? [])}</div>
+            {/* Simulates the summaries fetch resolving the display name. */}
+            <button data-testid="set-display-name" onClick={() => onDisplayNameChange?.('Nice Name')}>
+                set display name
+            </button>
+            {/* Simulates a node's "Explore Architecture" action (context consumer). */}
+            <button
+                data-testid="navigate-detailed-arch"
+                onClick={() => onNavigateToDetailedArch?.('/calm/namespaces/finos/architectures/target-arch/versions/2.0.0')}
+            >
+                navigate detailed
+            </button>
+            <button
+                data-testid="navigate-detailed-arch-bad"
+                onClick={() => onNavigateToDetailedArch?.('/not/a/calm/path')}
+            >
+                navigate bad
+            </button>
             {/* Lets tests simulate a node/edge tap on the graph so Hub's node-detail
                 wiring (the mobile bottom-sheet + prev/next steppers) is exercised.
                 `select-node` (n1) is retained for existing tests; `select-n1/n2/n3`
@@ -197,8 +231,10 @@ vi.mock('./components/diagram-section/DiagramSection', () => ({
                 select edge
             </button>
         </div>
-    ),
-}));
+        );
+    };
+    return { DiagramSection };
+});
 
 // Helpers to drive the captured load callbacks.
 const loadData = () =>
@@ -275,6 +311,21 @@ const renderAt = (path: string) =>
     render(
         <MemoryRouter initialEntries={[path]}>
             <Hub />
+        </MemoryRouter>
+    );
+
+// Echoes the live pathname so tests can assert where a context-triggered
+// navigation landed. Accepts entry objects so a test can seed history state.
+function LocationProbe() {
+    const location = useLocation();
+    return <div data-testid="location-pathname">{location.pathname}</div>;
+}
+
+const renderWithLocation = (entries: React.ComponentProps<typeof MemoryRouter>['initialEntries']) =>
+    render(
+        <MemoryRouter initialEntries={entries}>
+            <Hub />
+            <LocationProbe />
         </MemoryRouter>
     );
 
@@ -722,4 +773,69 @@ describe('Hub', () => {
             expect(screen.queryByTestId('adr-renderer')).not.toBeInTheDocument();
         });
     });
+    describe('detailed-architecture navigation (breadcrumb state)', () => {
+        const readCrumbs = () => JSON.parse(screen.getByTestId('breadcrumbs').textContent!);
+
+        it('pushes the current resource as a named crumb and navigates to the parsed target', () => {
+            renderWithLocation(['/test-namespace/architectures/arch/1.0']);
+            loadArchitectureWithNodes();
+            fireEvent.click(screen.getByTestId('set-display-name'));
+
+            fireEvent.click(screen.getByTestId('navigate-detailed-arch'));
+
+            expect(screen.getByTestId('location-pathname')).toHaveTextContent(
+                '/finos/architectures/target-arch/2.0.0'
+            );
+            // The new route's resource loads; the remounted diagram receives the trail.
+            loadArchitectureWithNodes();
+            expect(readCrumbs()).toEqual([
+                { namespace: 'test-namespace', type: 'architectures', id: 'arch', version: '1.0', name: 'Nice Name' },
+            ]);
+        });
+
+        it('accumulates one crumb per hop and omits the name when it never resolved', () => {
+            renderWithLocation(['/test-namespace/architectures/arch/1.0']);
+            loadArchitectureWithNodes();
+            fireEvent.click(screen.getByTestId('navigate-detailed-arch'));
+            loadArchitectureWithNodes();
+            expect(readCrumbs()).toHaveLength(1);
+
+            fireEvent.click(screen.getByTestId('navigate-detailed-arch'));
+            loadArchitectureWithNodes();
+
+            const crumbs = readCrumbs();
+            expect(crumbs).toHaveLength(2);
+            // No set-display-name click before either hop's navigation: the crumb
+            // carries no name and consumers fall back to the id.
+            expect(crumbs[0].name).toBeUndefined();
+            expect(crumbs[1]).toEqual({ namespace: 'test-namespace', type: 'architectures', id: 'arch', version: '1.0' });
+        });
+
+        it('ignores references that are not CALM Hub paths, keeping the current view intact', () => {
+            renderWithLocation(['/test-namespace/architectures/arch/1.0']);
+            loadArchitectureWithNodes();
+
+            fireEvent.click(screen.getByTestId('navigate-detailed-arch-bad'));
+
+            expect(screen.getByTestId('location-pathname')).toHaveTextContent(
+                '/test-namespace/architectures/arch/1.0'
+            );
+            // No navigation happened, so the loaded diagram was not cleared.
+            expect(screen.getByTestId('diagram-section')).toHaveTextContent('Diagram: arch');
+        });
+
+        it('filters malformed entries out of untrusted history state', () => {
+            const valid = { namespace: 'finos', type: 'architectures', id: 'parent', version: '1.0.0' };
+            renderWithLocation([
+                {
+                    pathname: '/test-namespace/architectures/arch/1.0',
+                    state: { breadcrumbs: [valid, { junk: true }, 'nonsense', null, { namespace: 'x', type: 'flows', id: 'y', version: '1' }] },
+                },
+            ]);
+            loadArchitectureWithNodes();
+
+            expect(readCrumbs()).toEqual([valid]);
+        });
+    });
+
 });

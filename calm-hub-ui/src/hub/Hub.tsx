@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { IoChevronForwardOutline, IoCompassOutline } from 'react-icons/io5';
 import { ExploreRail } from './components/explore-rail/ExploreRail.js';
@@ -8,7 +8,7 @@ import { DomainPage } from './components/domain-page/DomainPage.js';
 import { FirstRunLanding } from './components/first-run-landing/FirstRunLanding.js';
 import { useResourceFromRoute } from './hooks/useResourceFromRoute.js';
 import { useIsMobile } from '../hooks/useMediaQuery.js';
-import { Data, Adr } from '../model/calm.js';
+import { BreadcrumbItem, Data, Adr } from '../model/calm.js';
 import { ControlData } from '../model/control.js';
 import { InterfaceData } from '../model/interface.js';
 import { NamespaceCounts, DomainControlCount } from '../model/counts.js';
@@ -21,12 +21,36 @@ import { InterfaceDetailSection } from './components/interface-detail-section/In
 import { DiagramSection } from './components/diagram-section/DiagramSection.js';
 import { Sidebar } from '../visualizer/components/sidebar/Sidebar.js';
 import { NodeSheet } from '../visualizer/components/sidebar/NodeSheet.js';
+import { DiagramActionsContext } from '../visualizer/context/DiagramActionsContext.js';
+import { ResourceNotFound } from './components/resource-not-found/ResourceNotFound.js';
+import { parseCALMHubPath } from '../visualizer/components/reactflow/utils/calmHelpers.js';
 import type { SelectedItem } from '../visualizer/contracts/contracts.js';
 import type { CalmNodeSchema } from '@finos/calm-models/types';
 import { authStore } from '../service/utils/auth-store.js';
 import './Hub.css';
 
+// Breadcrumbs live in history state so Back restores the parent's trail for free,
+// at the documented cost that a hard refresh or shared deep link starts with an
+// empty trail. History state is untyped and can be stale (older sessions) or set
+// by other code, so validate the shape instead of trusting a cast.
+function readBreadcrumbs(state: unknown): BreadcrumbItem[] {
+    const crumbs = (state as { breadcrumbs?: unknown } | null)?.breadcrumbs;
+    if (!Array.isArray(crumbs)) return [];
+    return crumbs.filter(
+        (c): c is BreadcrumbItem =>
+            typeof c === 'object' &&
+            c !== null &&
+            typeof (c as BreadcrumbItem).namespace === 'string' &&
+            ((c as BreadcrumbItem).type === 'architectures' || (c as BreadcrumbItem).type === 'patterns') &&
+            typeof (c as BreadcrumbItem).id === 'string' &&
+            typeof (c as BreadcrumbItem).version === 'string'
+    );
+}
+
 export default function Hub() {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const currentDisplayNameRef = useRef<string | undefined>(undefined);
     const [data, setData] = useState<Data | undefined>();
     const [adrData, setAdrData] = useState<Adr | undefined>();
     const [controlData, setControlData] = useState<ControlData | undefined>();
@@ -34,6 +58,9 @@ export default function Hub() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileNavOpen, setIsMobileNavOpen] = useState(true);
     const [selectedItem, setSelectedItem] = useState<SelectedItem>(null);
+    // A detail-route load rejected (missing resource, dangling reference). Cleared
+    // on every navigation; renders ResourceNotFound instead of an empty pane.
+    const [resourceLoadFailed, setResourceLoadFailed] = useState(false);
     const [namespaceCounts, setNamespaceCounts] = useState<NamespaceCounts[]>([]);
     const [namespaceCountsLoaded, setNamespaceCountsLoaded] = useState(false);
     // Distinct from "loaded": a failed counts fetch means counts are unknown, not
@@ -46,8 +73,6 @@ export default function Hub() {
     // Route-first content selection (redesign problem #4): the same <Hub/> element
     // is reused across `/`, `/namespace/:ns`, `/domain/:domain` and the detail
     // route, so the URL — not residual state — decides what renders.
-    const { key: locationKey } = useLocation();
-    const navigate = useNavigate();
     const namespaceMatch = useMatch('/namespace/:ns');
     const domainMatch = useMatch('/domain/:domain');
     const detailMatch = useMatch('/:namespace/:type/:id/:version');
@@ -107,7 +132,8 @@ export default function Hub() {
         setControlData(undefined);
         setInterfaceData(undefined);
         setSelectedItem(null);
-    }, [locationKey]);
+        setResourceLoadFailed(false);
+    }, [location.key]);
 
     const handleDataLoad = useCallback((loaded: Data) => {
         setData(loaded);
@@ -116,6 +142,7 @@ export default function Hub() {
         setInterfaceData(undefined);
         setSelectedItem(null);
         setIsMobileNavOpen(false);
+        currentDisplayNameRef.current = undefined;
     }, []);
 
     const handleAdrLoad = useCallback((adr: Adr) => {
@@ -145,12 +172,18 @@ export default function Hub() {
         setIsMobileNavOpen(false);
     }, []);
 
+    const handleResourceLoadError = useCallback((error: unknown) => {
+        console.error('%s', 'Failed to load routed resource:', error);
+        setResourceLoadFailed(true);
+    }, []);
+
     // Single owner of deep-link / external-navigation loading for the detail route.
     useResourceFromRoute({
         onDataLoad: handleDataLoad,
         onAdrLoad: handleAdrLoad,
         onControlLoad: handleControlLoad,
         onInterfaceLoad: handleInterfaceLoad,
+        onLoadError: handleResourceLoadError,
     });
 
     const handleItemSelect = useCallback((item: SelectedItem) => {
@@ -190,6 +223,41 @@ export default function Hub() {
             }
         },
         [isDetailRoute, navigate, handleControlLoad]
+    );
+
+    // The resource's display name is fetched by DiagramSection (it owns the
+    // summaries fetch) and mirrored here so the crumb pushed on navigation can
+    // carry it. A ref, not state: it is only read imperatively at navigate time,
+    // so Hub need not re-render when it resolves. This handler MUST stay memoised
+    // (identity-stable) — DiagramSection lists it in a fetch effect's deps.
+    const handleDisplayNameChange = useCallback((name: string | undefined) => {
+        currentDisplayNameRef.current = name;
+    }, []);
+
+    const handleNavigateToDetailedArch = useCallback((ref: string) => {
+        const parsed = parseCALMHubPath(ref);
+        if (!parsed || !data) return;
+        const currentCrumb: BreadcrumbItem = {
+            namespace: data.name,
+            type: data.calmType === 'Architectures' ? 'architectures' : 'patterns',
+            id: data.id,
+            version: data.version,
+            name: currentDisplayNameRef.current,
+        };
+        navigate(`/${parsed.namespace}/${parsed.type}/${parsed.id}/${parsed.version}`, {
+            state: { breadcrumbs: [...readBreadcrumbs(location.state), currentCrumb] }
+        });
+    }, [navigate, data, location.state]);
+
+    const breadcrumbs = useMemo(() => readBreadcrumbs(location.state), [location.state]);
+
+    // Single, memoised provider value for every detailed-architecture navigation
+    // consumer: CustomNode (which ReactFlow instantiates internally, out of reach
+    // of props) and NodeDetails (rendered in both the Sidebar and the NodeSheet).
+    // Memoised so consumers don't re-render on unrelated Hub renders.
+    const diagramActions = useMemo(
+        () => ({ onNavigateToDetailedArch: handleNavigateToDetailedArch }),
+        [handleNavigateToDetailedArch]
     );
 
     const isDiagramView = data?.calmType === 'Architectures' || data?.calmType === 'Patterns';
@@ -269,7 +337,13 @@ export default function Hub() {
     ) : adrData ? (
         <AdrRenderer adrDetails={adrData} />
     ) : isDiagramView ? (
-        <DiagramSection data={data} onItemSelect={handleItemSelect} hasDetailsPanel={!!selectedItem} />
+        <DiagramSection
+            data={data}
+            onItemSelect={handleItemSelect}
+            hasDetailsPanel={!!selectedItem}
+            breadcrumbs={breadcrumbs}
+            onDisplayNameChange={handleDisplayNameChange}
+        />
     ) : (
         <DocumentDetailSection data={data} />
     );
@@ -290,6 +364,16 @@ export default function Hub() {
             controlCount={controlDomainCount}
             onControlLoad={handleControlActivate}
             selectedControlId={controlData.controlId}
+        />
+    ) : isDetailRoute && resourceLoadFailed && !interfaceData && !adrData && !data ? (
+        // The routed resource failed to load: show a recoverable not-found state
+        // (never a blank pane). Loaded data wins if a late success ever lands.
+        <ResourceNotFound
+            namespace={detailMatch.params.namespace!}
+            id={detailMatch.params.id!}
+            version={detailMatch.params.version!}
+            type={detailMatch.params.type}
+            breadcrumbs={breadcrumbs}
         />
     ) : isDetailRoute || interfaceData || adrData || data ? (
         detailContent
@@ -313,6 +397,7 @@ export default function Hub() {
     );
 
     return (
+        <DiagramActionsContext.Provider value={diagramActions}>
         <div className="flex flex-col h-screen overflow-hidden">
             <Navbar />
             {isMobile && !isMobileNavOpen && (
@@ -415,5 +500,6 @@ export default function Hub() {
                 )}
             </div>
         </div>
+        </DiagramActionsContext.Provider>
     );
 }
