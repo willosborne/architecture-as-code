@@ -149,10 +149,23 @@ Useful for producing documentation, reports, or configs. Template bundles requir
 Generate a documentation website from a CALM model:
 
 ```shell
-calm docify -a <architecture> -o <output> [--template <file>] [--template-dir <dir>] [--url-to-local-file-mapping <json>] [--clear-output-directory] [--verbose]
+calm docify -a <architecture> -o <output> [--template <file>] [--template-dir <dir>] [--url-to-local-file-mapping <json>] [--clear-output-directory] [--export-diagrams <svg|png>] [--browser-path <path>] [--diagram-render-timeout <ms>] [--verbose]
 ```
 
 Creates a browsable site that visualizes nodes, relationships, interfaces, and metadata.
+
+### Exporting Diagrams as Images
+
+By default, generated documentation contains Mermaid diagrams as ` ```mermaid ` code blocks. Pass `--export-diagrams <svg|png>` to render these into image files using a local Chromium-based browser, replacing each code block with an image reference (e.g. `_diagrams/my-page-1.svg`).
+
+```shell
+calm docify -a architecture.json -o docs/output --export-diagrams svg
+```
+
+- Requires Google Chrome or Microsoft Edge installed locally (auto-detected). Use `--browser-path <path>` to point at another Chromium-based browser (Brave, Vivaldi, Chromium, etc.) if auto-detection fails.
+- `--diagram-render-timeout <ms>`: per-diagram render timeout (default `30000`).
+- Adds roughly 10-40 seconds to the command depending on the number of diagrams.
+- If no browser is found, or a diagram fails to render (timeout/invalid syntax), that diagram is left as a Mermaid code block with a warning logged; the rest of the documentation is unaffected. An invalid `--browser-path` is a fatal error.
 
 ### Using `--url-to-local-file-mapping`
 
