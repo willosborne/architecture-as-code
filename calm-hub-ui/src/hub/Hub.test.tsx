@@ -84,13 +84,19 @@ vi.mock('./components/domain-page/DomainPage', () => ({
     ),
 }));
 
-// Mocked at the seam: the real landing fires a bounded CalmService fetch on mount,
-// which is exercised in its own spec. Here we only need to confirm Hub renders it
-// on the empty `/` route.
-vi.mock('./components/first-run-landing/FirstRunLanding', () => ({
-    FirstRunLanding: ({ namespaceCounts }: { namespaceCounts: { namespace: string }[] }) => (
-        <div data-testid="first-run-landing">Landing ({namespaceCounts.length})</div>
+// Mocked at the seam: the real intro fires a bounded CalmService fetch on mount and
+// carries its own theme/search wiring, exercised in its own spec. Here we only need
+// to confirm Hub early-returns the chrome-free intro on the empty `/` route.
+vi.mock('./components/intro-screen/IntroScreen', () => ({
+    IntroScreen: ({ namespaceCounts }: { namespaceCounts: { namespace: string }[] }) => (
+        <div data-testid="intro-screen">Intro ({namespaceCounts.length})</div>
     ),
+}));
+
+// The full results page is reached on `/search`; mocked here so Hub tests never hit
+// the real SearchService.
+vi.mock('./components/search-results/SearchResultsPage', () => ({
+    SearchResultsPage: () => <div data-testid="search-results-page">Search Results</div>,
 }));
 
 // Counts service returns deterministic data for the page meta assertions.
@@ -358,11 +364,27 @@ describe('Hub', () => {
         captured = undefined;
     });
 
-    it('renders Navbar and the browse rail', () => {
-        renderAt('/');
+    it('renders Navbar and the browse rail on a browse route', () => {
+        // The bare `/` intro is chrome-free; the navbar + rail appear on every other
+        // route (here a namespace page).
+        renderAt('/namespace/finos');
         expect(screen.getByTestId('navbar')).toBeInTheDocument();
         expect(screen.getByTestId('explore-rail')).toBeInTheDocument();
         expect(screen.getByText('Explore Rail')).toBeInTheDocument();
+    });
+
+    it('renders the chrome-free intro (no navbar, no rail) on the empty / route', () => {
+        renderAt('/');
+        expect(screen.getByTestId('intro-screen')).toBeInTheDocument();
+        expect(screen.queryByTestId('navbar')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('explore-rail')).not.toBeInTheDocument();
+    });
+
+    it('renders the full search results page (with chrome) on /search', () => {
+        renderAt('/search?q=payments');
+        expect(screen.getByTestId('navbar')).toBeInTheDocument();
+        expect(screen.getByTestId('explore-rail')).toBeInTheDocument();
+        expect(screen.getByTestId('search-results-page')).toBeInTheDocument();
     });
 
     it('renders DiagramSection when pattern data is loaded', () => {
@@ -453,12 +475,12 @@ describe('Hub', () => {
             expect(await screen.findByTestId('domain-page')).toHaveTextContent('Domain: security (3)');
         });
 
-        it('renders the first-run landing (not a namespace/domain page) on the empty / route', async () => {
+        it('renders the intro (not a namespace/domain page) on the empty / route', async () => {
             renderAt('/');
             expect(screen.queryByTestId('namespace-page')).not.toBeInTheDocument();
             expect(screen.queryByTestId('domain-page')).not.toBeInTheDocument();
-            // Landing receives the namespace counts Hub fetched (one in the mock).
-            expect(await screen.findByTestId('first-run-landing')).toHaveTextContent('Landing (1)');
+            // Intro receives the namespace counts Hub fetched (one in the mock).
+            expect(await screen.findByTestId('intro-screen')).toHaveTextContent('Intro (1)');
         });
     });
 
@@ -555,22 +577,24 @@ describe('Hub', () => {
         });
     });
 
+    // The rail lives in Hub's normal (non-intro) layout, so these exercise it on a
+    // browse route rather than the chrome-free `/` intro.
     describe('sidebar collapse', () => {
         it('shows sidebar expanded by default with collapse button', () => {
-            renderAt('/');
+            renderAt('/namespace/finos');
             expect(screen.getByTestId('explore-rail')).toBeInTheDocument();
             expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument();
         });
 
         it('hides the rail when sidebar is collapsed', () => {
-            renderAt('/');
+            renderAt('/namespace/finos');
             fireEvent.click(screen.getByLabelText('Collapse sidebar'));
             expect(screen.queryByTestId('explore-rail')).not.toBeInTheDocument();
             expect(screen.getByLabelText('Expand sidebar')).toBeInTheDocument();
         });
 
         it('restores the rail when sidebar is expanded again', () => {
-            renderAt('/');
+            renderAt('/namespace/finos');
             fireEvent.click(screen.getByLabelText('Collapse sidebar'));
             expect(screen.queryByTestId('explore-rail')).not.toBeInTheDocument();
             fireEvent.click(screen.getByLabelText('Expand sidebar'));
@@ -593,13 +617,37 @@ describe('Hub', () => {
             })) as unknown as typeof window.matchMedia;
         });
 
-        it('opens the drill-down panel immediately on mobile and does not render the desktop rail', () => {
+        it('shows the chrome-free intro on mobile / (no drill-down, no rail)', () => {
             const restore = mockMobileViewport(true);
             renderAt('/');
+
+            expect(screen.getByTestId('intro-screen')).toBeInTheDocument();
+            expect(screen.queryByTestId('mobile-nav-menu')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('explore-rail')).not.toBeInTheDocument();
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+            restore();
+        });
+
+        it('opens the drill-down panel immediately on a mobile browse route and does not render the desktop rail', () => {
+            const restore = mockMobileViewport(true);
+            renderAt('/namespace/finos');
 
             expect(screen.getByTestId('mobile-nav-menu')).toBeInTheDocument();
             expect(screen.queryByTestId('explore-rail')).not.toBeInTheDocument();
             expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+            restore();
+        });
+
+        it('shows the search results on mobile /search, not the drill-down overlay', () => {
+            // The overlay defaults open; on /search it must be closed so the results
+            // (the only mobile search destination) are visible, not covered.
+            const restore = mockMobileViewport(true);
+            renderAt('/search?q=payments');
+
+            expect(screen.getByTestId('search-results-page')).toBeInTheDocument();
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
             restore();
         });

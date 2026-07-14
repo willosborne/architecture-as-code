@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IoSearchOutline, IoCloseOutline } from 'react-icons/io5';
-import { SearchService } from '../../service/search-service.js';
-import { CalmService } from '../../service/calm-service.js';
-import { AdrService } from '../../service/adr-service/adr-service.js';
-import { SearchResult } from '../../model/search.js';
-import { FlatResult, TYPE_LABELS, useSearchNavigation } from '../../hooks/useSearchNavigation.js';
-import { useCatalogueSearch } from '../../hooks/useCatalogueSearch.js';
-import { colors } from '../../theme/colors.js';
+import { SearchService } from '../../../service/search-service.js';
+import { SearchResult } from '../../../model/search.js';
+import { FlatResult, TYPE_LABELS, useSearchNavigation } from '../../../hooks/useSearchNavigation.js';
+import { useCatalogueSearch } from '../../../hooks/useCatalogueSearch.js';
+import { colors } from '../../../theme/colors.js';
 
-interface GlobalSearchBarProps {
+interface IntroSearchBarProps {
+    /** Injected for tests; defaults to a fresh {@link SearchService}. */
     searchService?: SearchService;
-    calmService?: CalmService;
-    adrService?: AdrService;
 }
 
-export function GlobalSearchBar({ searchService, calmService: calmServiceProp, adrService: adrServiceProp }: GlobalSearchBarProps) {
+/**
+ * The intro screen's large search entry point. A live dropdown deep-links a chosen
+ * match; submitting the query (Enter with nothing highlighted, or the Search button)
+ * goes to the full `/search` results page.
+ */
+export function IntroSearchBar({ searchService }: IntroSearchBarProps) {
     const {
         query,
         results,
@@ -32,10 +34,13 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
 
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const calmService = useMemo(() => calmServiceProp ?? new CalmService(), [calmServiceProp]);
-    const adrService = useMemo(() => adrServiceProp ?? new AdrService(), [adrServiceProp]);
-    const { navigateToResult: goToResult } = useSearchNavigation({ calmService, adrService });
+    const { navigateToResult: goToResult } = useSearchNavigation();
     const navigate = useNavigate();
+
+    const handleClear = useCallback(() => {
+        clear();
+        inputRef.current?.focus();
+    }, [clear]);
 
     const navigateToResult = useCallback(
         (flatResult: FlatResult) => {
@@ -45,7 +50,7 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
         [clear, goToResult]
     );
 
-    // `clear` also cancels the pending debounce, so no stray dropdown reopens after nav.
+    // `clear` also cancels the pending debounce, so no stray fetch fires after nav.
     const submitQuery = useCallback(() => {
         const trimmed = query.trim();
         if (!trimmed) return;
@@ -65,7 +70,6 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
                 moveSelection(-1);
             } else if (e.key === 'Enter') {
                 e.preventDefault();
-                // A highlighted preview result deep-links; otherwise submit the query.
                 if (open && selectedIndex >= 0 && flatResults[selectedIndex]) {
                     navigateToResult(flatResults[selectedIndex]);
                 } else {
@@ -77,11 +81,6 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
         },
         [open, flatResults, selectedIndex, moveSelection, navigateToResult, submitQuery, closeDropdown]
     );
-
-    const handleClear = useCallback(() => {
-        clear();
-        inputRef.current?.focus();
-    }, [clear]);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
@@ -96,17 +95,15 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
 
     const renderGroupedResults = () => {
         if (error) {
-            return <div className="p-3 text-sm text-error">Search failed, please try again</div>;
+            return <div className="p-4 text-sm text-error">Search failed, please try again</div>;
         }
 
         if (!results) return null;
 
-        const groups = Object.entries(results).filter(
-            ([, items]) => (items as SearchResult[]).length > 0
-        );
+        const groups = Object.entries(results).filter(([, items]) => (items as SearchResult[]).length > 0);
 
         if (groups.length === 0) {
-            return <div className="p-3 text-sm text-base-content/60">No results found</div>;
+            return <div className="p-4 text-sm text-base-content/60">No results found</div>;
         }
 
         let globalIndex = 0;
@@ -114,7 +111,7 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
         return groups.map(([type, items]) => (
             <div key={type}>
                 <div
-                    className="px-3 py-1 font-mono-jb text-[10px] uppercase tracking-[0.1em]"
+                    className="px-4 py-1.5 font-mono-jb text-[10px] uppercase tracking-[0.1em]"
                     style={{ color: colors.redesign.faintAlt, backgroundColor: colors.redesign.surface }}
                 >
                     {TYPE_LABELS[type] ?? type}
@@ -124,40 +121,27 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
                     return (
                         <button
                             key={`${type}-${item.namespace}-${item.id}`}
-                            className={`w-full text-left px-3 py-2 text-sm hover:bg-base-200 cursor-pointer ${
+                            className={`w-full text-left px-4 py-2.5 text-sm hover:bg-base-200 cursor-pointer ${
                                 currentIndex === selectedIndex ? 'bg-base-200' : ''
                             }`}
                             onMouseDown={() => navigateToResult({ type, result: item })}
                             role="option"
                             aria-selected={currentIndex === selectedIndex}
                         >
-                            {/* Name + a right-aligned mono namespace chip so duplicate
-                                names across namespaces (problem #9) are distinguishable.
-                                No version chip: SearchResult carries no version and
-                                resolving it per result would be an N+1 — deferred. */}
                             <div className="flex items-center gap-2">
-                                <span
-                                    className="font-medium truncate min-w-0"
-                                    style={{ color: colors.redesign.ink }}
-                                >
+                                <span className="font-medium truncate min-w-0" style={{ color: colors.redesign.ink }}>
                                     {item.name}
                                 </span>
                                 <span
                                     data-testid="result-namespace-chip"
                                     className="ml-auto shrink-0 font-mono-jb text-[10px] rounded-[6px] px-1.5 py-0.5"
-                                    style={{
-                                        backgroundColor: colors.redesign.badgeBg,
-                                        color: colors.redesign.mutedAlt,
-                                    }}
+                                    style={{ backgroundColor: colors.redesign.badgeBg, color: colors.redesign.mutedAlt }}
                                 >
                                     {item.namespace}
                                 </span>
                             </div>
                             {item.description && (
-                                <div
-                                    className="text-xs truncate mt-0.5"
-                                    style={{ color: colors.redesign.mutedAlt }}
-                                >
+                                <div className="text-xs truncate mt-0.5" style={{ color: colors.redesign.mutedAlt }}>
                                     {item.description}
                                 </div>
                             )}
@@ -169,38 +153,48 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
     };
 
     return (
-        <div ref={containerRef} className="relative">
-            <div className="flex items-center gap-1 bg-base-200 rounded-lg px-3 py-1.5">
-                <IoSearchOutline className="text-base-content/50 h-4 w-4 shrink-0" />
+        <div ref={containerRef} className="relative w-full max-w-[640px]">
+            <div
+                className="flex items-center gap-3 rounded-2xl px-5 py-3.5 shadow-sm focus-within:shadow-md transition-shadow"
+                style={{ backgroundColor: colors.redesign.surface, border: `1px solid ${colors.redesign.border}` }}
+            >
+                <IoSearchOutline className="h-5 w-5 shrink-0" style={{ color: colors.redesign.muted }} />
                 <input
                     ref={inputRef}
                     type="text"
-                    placeholder="Search CALM Hub..."
-                    className="bg-transparent border-none outline-none text-sm text-base-content placeholder:text-base-content/40 w-28 sm:w-48 lg:w-64"
+                    placeholder="Search the architecture catalogue…"
+                    className="flex-1 min-w-0 bg-transparent border-none outline-none text-base text-base-content placeholder:text-base-content/40"
                     value={query}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    aria-label="Search"
+                    aria-label="Search the architecture catalogue"
                     role="combobox"
                     aria-expanded={open}
                     aria-haspopup="listbox"
+                    autoFocus
                 />
+                {loading && <span className="loading loading-spinner loading-sm text-base-content/50" />}
                 {query && (
                     <button
                         onClick={handleClear}
                         className="text-base-content/50 hover:text-base-content cursor-pointer"
                         aria-label="Clear search"
                     >
-                        <IoCloseOutline className="h-4 w-4" />
+                        <IoCloseOutline className="h-5 w-5" />
                     </button>
                 )}
-                {loading && (
-                    <span className="loading loading-spinner loading-xs text-base-content/50" />
-                )}
+                <button
+                    onClick={submitQuery}
+                    disabled={!query.trim()}
+                    className="btn btn-primary btn-sm rounded-xl px-4 disabled:opacity-50"
+                    aria-label="Search"
+                >
+                    Search
+                </button>
             </div>
             {open && (
                 <div
-                    className="absolute right-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-96 overflow-y-auto bg-base-100 border border-base-300 rounded-lg shadow-lg z-50"
+                    className="absolute left-0 right-0 top-full mt-2 max-h-96 overflow-y-auto bg-base-100 border border-base-300 rounded-xl shadow-lg z-50"
                     role="listbox"
                 >
                     {renderGroupedResults()}
