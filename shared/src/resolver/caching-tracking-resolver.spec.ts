@@ -58,6 +58,20 @@ describe('CachingTrackingResolver', () => {
         expect(resolver.get('a')).toBeUndefined();
     });
 
+    // Reproduces rocketstack-matt's review comment on PR #2805:
+    // https://github.com/finos/architecture-as-code/pull/2805#discussion_r3576885163
+    // Asserts the DESIRED behaviour (delegate attempted once); expected to FAIL against current
+    // code, which retries the delegate. Left red pending clarification before fixing.
+    it('does not retry the delegate for a reference whose first load failed', async () => {
+        const resolve = vi.fn().mockRejectedValue(new Error('boom'));
+        const resolver = new CachingTrackingResolver(fakeResolver({ resolve }));
+
+        await expect(resolver.resolve('a')).rejects.toThrow('boom');
+        await expect(resolver.resolve('a')).rejects.toThrow('boom');
+
+        expect(resolve).toHaveBeenCalledTimes(1);
+    });
+
     it('supports pre-seeding seen references via markSeen()', () => {
         const resolver = new CachingTrackingResolver(fakeResolver());
 

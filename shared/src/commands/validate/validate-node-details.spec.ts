@@ -254,6 +254,35 @@ describe('validateNodeDetails', () => {
         expect(result.jsonSchemaOutputs[1].path).toBe('/nodes/1/details/detailed-architecture/y');
     });
 
+    // Reproduces rocketstack-matt's review comment on PR #2805:
+    // https://github.com/finos/architecture-as-code/pull/2805#discussion_r3576885169
+    // Asserts the DESIRED behaviour (both nodes report); expected to FAIL against current code,
+    // which returns only one error. Left red pending clarification before fixing.
+    it('reports a load error for every node sharing the same broken detailed-architecture reference', async () => {
+        const brokenUrl = 'https://example.com/missing-shared.json';
+        const arch = {
+            nodes: [
+                {
+                    'unique-id': 'n1', 'node-type': 'service', name: 'N1', description: 'D',
+                    details: { 'detailed-architecture': brokenUrl }
+                },
+                {
+                    'unique-id': 'n2', 'node-type': 'service', name: 'N2', description: 'D',
+                    details: { 'detailed-architecture': brokenUrl }
+                }
+            ]
+        };
+        const schemaDir = makeSchemaDirectory({
+            loadDocument: vi.fn().mockRejectedValue(new Error('not found'))
+        });
+        const result = await validateNodeDetails(arch, schemaDir, false, noop, makeResolver(schemaDir));
+        expect(result.jsonSchemaOutputs).toHaveLength(2);
+        expect(result.jsonSchemaOutputs.map(o => o.path)).toEqual([
+            '/nodes/0/details/detailed-architecture',
+            '/nodes/1/details/detailed-architecture'
+        ]);
+    });
+
     it('propagates hasWarnings from sub-architecture outcome', async () => {
         const arch = {
             nodes: [{
