@@ -688,23 +688,50 @@ calm workspace check [--calm-hub-url <url>]
 
 A document is flagged when its on-disk `$id` version still matches a version in CalmHub but its content differs. Brand-new documents (not yet in CalmHub) and already-bumped documents (whose version is ahead of CalmHub) are not flagged.
 
+After checking for unbumped documents, `check` also silently validates every architecture and pattern in the workspace and prints a summary — for example:
+
+```
+All 3 document(s) passed validation.
+```
+
+or, if a document fails:
+
+```
+1 document(s) failed validation:
+  my-arch (2 error(s)) — run `calm validate -a .calm-workspace/files/my-arch.json` to see full output
+```
+
+The command exits non-zero if any documents need bumping **or** if any document fails validation.
+
 #### `calm workspace bump`
 
 Bump the version of every document that has changed on disk relative to CalmHub, and update every reference to those documents across the workspace so everything stays in sync.
 
 ```
-calm workspace bump [--calm-hub-url <url>] [--major | --patch]
+calm workspace bump [--calm-hub-url <url>] [--major | --patch] [--inherit-change-type]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to `calmHubUrl` in `~/.calm.json`. |
-| `--major` | Apply a major bump (e.g. `1.2.3` → `2.0.0`). |
-| `--patch` | Apply a patch bump (e.g. `1.2.3` → `1.2.4`). |
+| `--major` | Apply a major bump to all changed documents without prompting (e.g. `1.2.3` → `2.0.0`). |
+| `--patch` | Apply a patch bump to all changed documents without prompting (e.g. `1.2.3` → `1.2.4`). |
+| `--inherit-change-type` | Suppress prompts for cascade-bumped dependents; they silently inherit the trigger's bump type. |
 
-By default a **minor** bump is applied (override the default via `bump.defaultIncrement` in the workspace config, or per-run with `--major`/`--patch`). For each changed document the new version is computed relative to CalmHub's latest version, the file's `$id` is rewritten, and any `$ref` / `$schema` / `requirement-url` / `config-url` in **all** tracked documents that pointed at the old version is repointed to the new one (fragments preserved).
+When neither `--major` nor `--patch` is given, `bump` prompts interactively for each changed document:
+
+```
+? Bump type for 'my-pattern' (currently 1.0.0): › minor (default)
+? Bump type for 'my-arch' (depends on my-pattern): › minor (inherited)
+```
+
+Documents bumped as a cascade dependency of another document also get a prompt, with the trigger's increment pre-selected as the default. Pass `--inherit-change-type` to skip cascade prompts and auto-inherit silently.
+
+The default increment when no flag is given is **MINOR** (overridable via `bump.defaultIncrement` in the workspace config). For each changed document the new version is computed relative to CalmHub's latest version, the file's `$id` is rewritten, and any `$ref` / `$schema` / `requirement-url` / `config-url` in **all** tracked documents that pointed at the old version is repointed to the new one (fragments preserved).
 
 Bump is **idempotent**: editing → bumping → editing again → bumping again only moves the version by a single increment, because once a document's on-disk version is ahead of CalmHub it is left alone until that version is pushed.
+
+After bumping, `bump` silently validates every architecture and pattern in the workspace and prints the same pass/fail summary as `workspace check`. This is **informational only** — it never changes the exit code.
 
 #### Workspace config — `.calm-workspace/config.json`
 
