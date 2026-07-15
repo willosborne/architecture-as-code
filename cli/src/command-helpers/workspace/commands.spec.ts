@@ -556,10 +556,8 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).not.toHaveBeenCalled();
         });
 
-        it('reports validation failures but exits due to bump requirement, not validation', async () => {
-            mocks.detectChangedResources.mockResolvedValueOnce([
-                { id: 'doc-a', filePath: '/x', metadata: {}, currentVersion: '1.0.0', latestHubVersion: '1.0.0' },
-            ] as never);
+        it('exits 1 when validation fails even if no documents need bumping', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce([]);
             mocks.runPostBumpValidation.mockResolvedValueOnce([
                 { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: false, errorCount: 2 },
             ] as never);
@@ -568,14 +566,25 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
 
-        it('reports validation failure with "(could not validate)" when errorCount is -1', async () => {
+        it('exits 1 when both bump and validation failures are present', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/x', metadata: {}, currentVersion: '1.0.0', latestHubVersion: '1.0.0' },
+            ] as never);
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: false, errorCount: 2 },
+            ] as never);
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('exits 1 and reports "(could not validate)" when errorCount is -1', async () => {
             mocks.detectChangedResources.mockResolvedValueOnce([]);
             mocks.runPostBumpValidation.mockResolvedValueOnce([
                 { id: 'doc-a', filePath: '/a.json', type: 'pattern', passed: false, errorCount: -1 },
             ] as never);
-            await program.parseAsync(['node', 'test', 'workspace', 'check']);
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
             expect(mocks.runPostBumpValidation).toHaveBeenCalled();
-            expect(exitSpy).not.toHaveBeenCalled();
+            expect(exitSpy).toHaveBeenCalledWith(1);
         });
     });
 

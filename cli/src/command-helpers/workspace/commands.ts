@@ -390,21 +390,23 @@ export function setupWorkspaceCommands(program: Command) {
 
                 const manifest = await loadManifest(bundlePath);
                 const validationResults = await runPostBumpValidation(bundlePath, manifest);
+                let validationFailed = false;
                 if (validationResults.length > 0) {
                     const failures = validationResults.filter(r => !r.passed);
                     if (failures.length === 0) {
                         logger.info(`All ${validationResults.length} document(s) passed validation.`);
                     } else {
-                        logger.warn(`${failures.length} document(s) failed validation:`);
+                        validationFailed = true;
+                        logger.error(`${failures.length} document(s) failed validation:`);
                         for (const r of failures) {
                             const flag = r.type === 'architecture' ? '-a' : '-p';
                             const detail = r.errorCount >= 0 ? ` (${r.errorCount} error(s))` : ' (could not validate)';
-                            logger.warn(`  ${r.id}${detail} — run \`calm validate ${flag} ${r.filePath}\` to see full output`);
+                            logger.error(`  ${r.id}${detail} — run \`calm validate ${flag} ${r.filePath}\` to see full output`);
                         }
                     }
                 }
 
-                if (needsBump) {
+                if (needsBump || validationFailed) {
                     process.exit(1);
                 }
             } catch (err) {
