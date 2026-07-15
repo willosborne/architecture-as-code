@@ -636,6 +636,48 @@ describe('setupWorkspaceCommands', () => {
             await expect(program.parseAsync(['node', 'test', 'workspace', 'bump'])).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
+
+        it('runs post-bump validation and completes without error when all documents pass', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce(fakeChanged as never);
+            mocks.select.mockResolvedValueOnce('MINOR');
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: true, errorCount: 0 },
+            ] as never);
+            await program.parseAsync(['node', 'test', 'workspace', 'bump']);
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('runs post-bump validation and completes without error when a document fails with errors', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce(fakeChanged as never);
+            mocks.select.mockResolvedValueOnce('MINOR');
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: false, errorCount: 3 },
+            ] as never);
+            await program.parseAsync(['node', 'test', 'workspace', 'bump']);
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('runs post-bump validation and completes without error when a document could not be validated', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce(fakeChanged as never);
+            mocks.select.mockResolvedValueOnce('MINOR');
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'pattern', passed: false, errorCount: -1 },
+            ] as never);
+            await program.parseAsync(['node', 'test', 'workspace', 'bump']);
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('--inherit-change-type does not pass a getCascadeIncrement callback to bumpWorkspace', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce(fakeChanged as never);
+            mocks.select.mockResolvedValueOnce('MINOR');
+            await program.parseAsync(['node', 'test', 'workspace', 'bump', '--inherit-change-type']);
+            expect(mocks.bumpWorkspace).toHaveBeenCalled();
+            const callOptions = mocks.bumpWorkspace.mock.calls[0][2];
+            expect(callOptions.getCascadeIncrement).toBeUndefined();
+        });
     });
 
 });
