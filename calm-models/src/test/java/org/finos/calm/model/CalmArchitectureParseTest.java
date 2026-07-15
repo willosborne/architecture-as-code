@@ -7,6 +7,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -14,8 +15,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CalmArchitectureParseTest {
 
     static String loadFixture() throws Exception {
-        InputStream is = CalmArchitectureParseTest.class.getResourceAsStream("/test-architecture.json");
-        return new String(is.readAllBytes());
+        try (InputStream is = CalmArchitectureParseTest.class.getResourceAsStream("/test-architecture.json")) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     @Test

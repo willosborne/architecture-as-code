@@ -16,7 +16,14 @@ public final class CalmInterface {
     }
 
     static CalmInterface from(JsonNode json, ObjectMapper mapper) {
-        return new CalmInterface(json.path("unique-id").asText(), json, mapper);
+        if (!json.isObject()) {
+            throw new IllegalArgumentException("Interface JSON must be an object node");
+        }
+        String uniqueId = json.path("unique-id").asText();
+        if (uniqueId.isBlank()) {
+            throw new IllegalArgumentException("Interface must have a non-blank 'unique-id'");
+        }
+        return new CalmInterface(uniqueId, json, mapper);
     }
 
     public String uniqueId() { return uniqueId; }

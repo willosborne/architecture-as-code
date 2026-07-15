@@ -12,10 +12,14 @@ public class CalmMetadataHelper {
         if (raw == null || raw.isNull() || raw.isMissingNode()) return Map.of();
         if (raw.isArray()) {
             Map<String, Object> result = new LinkedHashMap<>();
-            raw.forEach(item -> item.fields().forEachRemaining(e ->
-                result.put(e.getKey(), mapper.convertValue(e.getValue(), Object.class))));
+            raw.forEach(item -> item.fields().forEachRemaining(e -> {
+                Object value = mapper.convertValue(e.getValue(), Object.class);
+                if (value != null) result.put(e.getKey(), value);
+            }));
             return Map.copyOf(result);
         }
-        return mapper.convertValue(raw, new TypeReference<>() {});
+        Map<String, Object> result = mapper.convertValue(raw, new TypeReference<>() {});
+        result.entrySet().removeIf(e -> e.getValue() == null);
+        return Map.copyOf(result);
     }
 }

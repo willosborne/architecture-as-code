@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,8 +18,9 @@ class CalmArchitectureQueryTest {
     @BeforeAll
     static void loadFixture() throws Exception {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        InputStream is = CalmArchitectureQueryTest.class.getResourceAsStream("/test-architecture.json");
-        arch = CalmArchitecture.parse(new String(is.readAllBytes()), mapper);
+        try (InputStream is = CalmArchitectureQueryTest.class.getResourceAsStream("/test-architecture.json")) {
+            arch = CalmArchitecture.parse(new String(is.readAllBytes(), StandardCharsets.UTF_8), mapper);
+        }
     }
 
     @Test

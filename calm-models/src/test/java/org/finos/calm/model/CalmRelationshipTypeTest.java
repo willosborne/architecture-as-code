@@ -2,11 +2,14 @@ package org.finos.calm.model;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.finos.calm.model.canonical.CalmRelationshipTypeSchema;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CalmRelationshipTypeTest {
@@ -16,8 +19,9 @@ class CalmRelationshipTypeTest {
     @BeforeAll
     static void loadFixture() throws Exception {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        InputStream is = CalmRelationshipTypeTest.class.getResourceAsStream("/test-architecture.json");
-        arch = CalmArchitecture.parse(new String(is.readAllBytes()), mapper);
+        try (InputStream is = CalmRelationshipTypeTest.class.getResourceAsStream("/test-architecture.json")) {
+            arch = CalmArchitecture.parse(new String(is.readAllBytes(), StandardCharsets.UTF_8), mapper);
+        }
     }
 
     @Test
@@ -65,5 +69,30 @@ class CalmRelationshipTypeTest {
             };
             assertThat(kind).isNotNull();
         }
+    }
+
+    @Test
+    void from_throwsWhenNoTypeProvided() throws Exception {
+        CalmRelationshipTypeSchema empty = new ObjectMapper().readValue("{}", CalmRelationshipTypeSchema.class);
+        assertThatThrownBy(() -> CalmRelationshipType.from(empty))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("No recognised relationship type");
+    }
+
+    @Test
+    void from_throwsWhenMultipleTypesProvided() throws Exception {
+        String json = """
+            {
+              "connects": {
+                "source": {"node": "a", "interfaces": []},
+                "destination": {"node": "b", "interfaces": []}
+              },
+              "interacts": {"actor": "user", "nodes": ["a"]}
+            }
+            """;
+        CalmRelationshipTypeSchema multi = new ObjectMapper().readValue(json, CalmRelationshipTypeSchema.class);
+        assertThatThrownBy(() -> CalmRelationshipType.from(multi))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("Exactly one relationship type");
     }
 }

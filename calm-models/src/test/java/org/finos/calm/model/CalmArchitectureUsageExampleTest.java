@@ -6,6 +6,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,8 +38,9 @@ class CalmArchitectureUsageExampleTest {
 
     @BeforeAll
     static void loadArchitecture() throws Exception {
-        InputStream is = CalmArchitectureUsageExampleTest.class.getResourceAsStream("/test-architecture.json");
-        arch = CalmArchitecture.parse(new String(is.readAllBytes()));
+        try (InputStream is = CalmArchitectureUsageExampleTest.class.getResourceAsStream("/test-architecture.json")) {
+            arch = CalmArchitecture.parse(new String(is.readAllBytes(), StandardCharsets.UTF_8));
+        }
     }
 
     @Test
