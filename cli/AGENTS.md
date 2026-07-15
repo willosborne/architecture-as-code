@@ -34,10 +34,11 @@ npm run link:cli       # Link CLI globally for testing
 calm --help            # Test globally linked CLI
 
 # Build steps (executed by npm run build)
-npm run copy-calm-schema      # Copy CALM JSON schemas from ../calm/
-npm run copy-docify-templates # Copy docify templates from ../shared/
-npm run copy-widgets          # Copy widget files from ../calm-widgets/
-npm run copy-ai-tools         # Copy AI agent files from ../calm-ai/
+npm run copy-calm-schema         # Copy CALM JSON schemas from ../calm/
+npm run copy-docify-templates    # Copy docify templates from ../shared/
+npm run copy-widgets             # Copy widget files from ../calm-widgets/
+npm run copy-ai-tools            # Copy AI agent files from ../calm-ai/
+npm run copy-workspace-templates # Copy `workspace new` templates from src/command-helpers/workspace/templates/
 ```
 
 ## Architecture Overview
@@ -60,7 +61,7 @@ npm run copy-ai-tools         # Copy AI agent files from ../calm-ai/
    - `hub push <resource> <file>` / `hub pull <resource>` / `hub list <resources>` / `hub create <resource>`
    - Resources span architectures, patterns, standards, control-requirements, control-configurations, namespaces, and domains (which subcommands exist varies per verb).
    - `hub push` auto-bumps by default (creates a new version off the latest). The `--fail-if-modified` flag (supported on `architecture`, `pattern`, `standard`, `control-requirement` and `control-configuration`) switches to a strict, non-bumping mode: a brand-new mapping is still created at `1.0.0`, an unchanged document is skipped, and a document that differs from the latest published version fails the push. The local document is normalised the same way Hub stores it (via `updateDocumentMetadata`/`updateControlDocumentMetadata`) before comparing with `canonicalEqual` from `@finos/calm-shared`, so a version-only or defaulted-field difference is not mistaken for a content change.
-10. **workspace** - Command **group** for a local, git-rooted bundle of CALM documents (`.calm-workspace/`). Subcommands include `init`, `add`, `new`, `tree`, `list`, `show`, `switch`, `clean`, and the CalmHub sync trio:
+10. **workspace** - Command **group** for a local, git-rooted bundle of CALM documents (`.calm-workspace/`). Subcommands include `init`, `add`, `rm`, `new`, `tree`, `list`, `show`, `switch`, `clean`, and the CalmHub sync trio:
     - `workspace push` — pushes the exact version each document's `$id` declares (no auto-bump). An existing version with unchanged content is skipped; `--fail-if-modified` (or `push.failIfModified: true` in `.calm-workspace/config.json`) fails when a document already published at its declared version has changed on disk, for strict merge-time CI.
     - `workspace check` — CI/PR gate: exits non-zero if any tracked document changed on disk relative to CalmHub but wasn't version-bumped, or if any architecture/pattern in the workspace fails validation. Prints a pass/fail validation summary alongside the bump check.
     - `workspace bump` — prompts interactively for the bump type (MAJOR/MINOR/PATCH) for each directly-changed document (default from config or MINOR). Cascade-bumped dependents are also prompted with the trigger's increment as the default; `--inherit-change-type` suppresses cascade prompts and auto-inherits silently. `--major`/`--patch` skip all prompts. After bumping, repoints all references to the new `$id`s and prints a post-bump validation summary (informational only). Idempotent: re-bumping an already-bumped doc is a no-op until it's pushed.
@@ -135,6 +136,23 @@ npm test --workspace cli              # All tests
 npm test --workspace cli -- --watch   # Watch mode
 npm test --workspace cli -- <file>    # Specific test file
 ```
+
+### CalmHub Smoke Tests (opt-in, Docker required)
+
+`cli/smoke/*.smoke.spec.ts` drive the packed CLI against a real CalmHub
+(Docker + MongoDB, no-auth). They are excluded from the default `npm test`.
+
+```bash
+# One-time (per change to calm-hub): build the hub image
+bash scripts/build-hub-smoke-image.sh   # -> calm-hub:smoke
+
+# Run the smoke suite (starts/stops the hub via docker compose)
+npm run build:cli
+npm run test:smoke --workspace cli
+```
+
+The suite starts one shared hub via `cli/smoke/global-setup.ts`; each flow uses
+its own namespace (`smoke-crud`, `smoke-genval`, `smoke-workspace`).
 
 ### Common Test Patterns
 - Use `test_helpers/` for shared test utilities

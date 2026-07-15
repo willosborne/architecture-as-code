@@ -18,11 +18,12 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.json.JsonParseException;
 import org.finos.calm.domain.Architecture;
-import org.finos.calm.domain.architecture.NamespaceArchitectureSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.domain.exception.ArchitectureNotFoundException;
 import org.finos.calm.domain.exception.ArchitectureVersionExistsException;
 import org.finos.calm.domain.exception.ArchitectureVersionNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
+import org.finos.calm.store.PageRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -117,27 +118,93 @@ public class TestMongoArchitectureStoreShould {
         archDetailMap1.put("architectureId", 1001);
         archDetailMap1.put("name", "Arch One");
         archDetailMap1.put("description", "First architecture");
+        archDetailMap1.put("versions", new Document("1-0-0", new Document()).append("2-0-0", new Document()));
         Document doc1 = new Document(archDetailMap1);
 
         Map<String, Object> archDetailMap2 = new HashMap<>();
         archDetailMap2.put("architectureId", 1002);
         archDetailMap2.put("name", "Arch Two");
         archDetailMap2.put("description", "Second architecture");
+        archDetailMap2.put("versions", new Document("1-0-0", new Document()));
         Document doc2 = new Document(archDetailMap2);
 
         when(documentMock.getList("architectures", Document.class))
                 .thenReturn(Arrays.asList(doc1, doc2));
 
-        List<NamespaceArchitectureSummary> architectures = mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> architectures = mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         assertThat(architectures.size(), is(2));
         assertThat(architectures.get(0).getName(), is("Arch One"));
         assertThat(architectures.get(0).getDescription(), is("First architecture"));
         assertThat(architectures.get(0).getId(), is(1001));
+        assertThat(architectures.get(0).getVersionCount(), is(2));
         assertThat(architectures.get(1).getName(), is("Arch Two"));
         assertThat(architectures.get(1).getDescription(), is("Second architecture"));
         assertThat(architectures.get(1).getId(), is(1002));
+        assertThat(architectures.get(1).getVersionCount(), is(1));
         verify(namespaceStore).namespaceExists(NAMESPACE);
+    }
+
+    @Test
+    void get_architectures_for_namespace_applies_slice_projection_when_limit_provided() throws NamespaceNotFoundException {
+        FindIterable<Document> findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(architectureCollection.find(eq(Filters.eq("namespace", NAMESPACE))))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any())).thenReturn(findIterable);
+        Document documentMock = Mockito.mock(Document.class);
+        when(findIterable.first()).thenReturn(documentMock);
+        when(documentMock.getList("architectures", Document.class)).thenReturn(new ArrayList<>());
+
+        mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE, new PageRequest(3, 6));
+
+        // The limit/offset is pushed down to Mongo as a $slice projection on the architectures array,
+        // rather than being sliced in memory after loading the whole namespace document.
+        verify(findIterable).projection(eq(Projections.slice("architectures", 6, 3)));
+    }
+
+    @Test
+    void get_architectures_for_namespace_does_not_project_when_no_limit_provided() throws NamespaceNotFoundException {
+        FindIterable<Document> findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(architectureCollection.find(eq(Filters.eq("namespace", NAMESPACE))))
+                .thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE, PageRequest.UNPAGED);
+
+        // No limit → full list → no $slice projection (unchanged behaviour).
+        verify(findIterable, times(0)).projection(any());
+    }
+
+    @Test
+    void get_architectures_for_namespace_defaults_offset_to_zero_when_only_limit_provided() throws NamespaceNotFoundException {
+        FindIterable<Document> findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(architectureCollection.find(eq(Filters.eq("namespace", NAMESPACE))))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any())).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE, new PageRequest(3, null));
+
+        verify(findIterable).projection(eq(Projections.slice("architectures", 0, 3)));
+    }
+
+    @Test
+    void get_architectures_for_namespace_clamps_a_negative_offset_to_zero() throws NamespaceNotFoundException {
+        FindIterable<Document> findIterable = Mockito.mock(DocumentFindIterable.class);
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(architectureCollection.find(eq(Filters.eq("namespace", NAMESPACE))))
+                .thenReturn(findIterable);
+        when(findIterable.projection(any())).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE, new PageRequest(3, -5));
+
+        // A negative offset is clamped to 0 rather than passed to $slice, which Mongo would otherwise
+        // interpret as "count from the end" — matching the in-memory Nitrite path.
+        verify(findIterable).projection(eq(Projections.slice("architectures", 0, 3)));
     }
 
     @Test
@@ -155,12 +222,14 @@ public class TestMongoArchitectureStoreShould {
         when(documentMock.getList("architectures", Document.class))
                 .thenReturn(List.of(legacyDoc));
 
-        List<NamespaceArchitectureSummary> architectures = mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE);
+        List<NamespaceResourceSummary> architectures = mongoArchitectureStore.getArchitecturesForNamespace(NAMESPACE);
 
         assertThat(architectures.size(), is(1));
         assertThat(architectures.get(0).getName(), is("Architecture 42"));
         assertThat(architectures.get(0).getDescription(), is(""));
         assertThat(architectures.get(0).getId(), is(42));
+        // Legacy document carries no versions sub-document → count guards to 0.
+        assertThat(architectures.get(0).getVersionCount(), is(0));
     }
 
     private FindIterable<Document> setupInvalidArchitecture() {

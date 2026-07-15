@@ -1,46 +1,11 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useCallback, useMemo, useRef } from 'react';
 import { IoSearchOutline, IoCloseOutline } from 'react-icons/io5';
 import { SearchService } from '../../service/search-service.js';
 import { CalmService } from '../../service/calm-service.js';
 import { AdrService } from '../../service/adr-service/adr-service.js';
-import { GroupedSearchResults, SearchResult } from '../../model/search.js';
-import { pickLatestVersion } from '../../model/version.js';
-
-interface FlatResult {
-    type: string;
-    result: SearchResult;
-}
-
-const TYPE_LABELS: Record<string, string> = {
-    architectures: 'Architectures',
-    patterns: 'Patterns',
-    flows: 'Flows',
-    standards: 'Standards',
-    interfaces: 'Interfaces',
-    controls: 'Controls',
-    adrs: 'ADRs',
-};
-
-const TYPE_ROUTES: Record<string, string> = {
-    architectures: 'architectures',
-    patterns: 'patterns',
-    flows: 'flows',
-    standards: 'standards',
-    interfaces: 'interfaces',
-    controls: 'controls',
-    adrs: 'adrs',
-};
-
-function flattenResults(grouped: GroupedSearchResults): FlatResult[] {
-    const flat: FlatResult[] = [];
-    for (const [type, results] of Object.entries(grouped)) {
-        for (const result of results as SearchResult[]) {
-            flat.push({ type, result });
-        }
-    }
-    return flat;
-}
+import { SearchResult } from '../../model/search.js';
+import { FlatResult, TYPE_LABELS, useSearchNavigation } from '../../hooks/useSearchNavigation.js';
+import { useCatalogueSearch } from '../../hooks/useCatalogueSearch.js';
 
 interface ExplorerSearchProps {
     searchService?: SearchService;
@@ -61,149 +26,43 @@ export function ExplorerSearch({
     adrService: adrServiceProp,
     onSearchingChange,
 }: ExplorerSearchProps) {
-    const [query, setQuery] = useState('');
-    const [results, setResults] = useState<GroupedSearchResults | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(false);
-    const [selectedIndex, setSelectedIndex] = useState(-1);
+    const {
+        query,
+        results,
+        loading,
+        error,
+        selectedIndex,
+        flatResults,
+        handleInputChange,
+        moveSelection,
+        clear,
+    } = useCatalogueSearch(searchService);
 
     const inputRef = useRef<HTMLInputElement>(null);
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const abortControllerRef = useRef<AbortController | null>(null);
-    const service = useMemo(() => searchService ?? new SearchService(), [searchService]);
     const calmService = useMemo(() => calmServiceProp ?? new CalmService(), [calmServiceProp]);
     const adrService = useMemo(() => adrServiceProp ?? new AdrService(), [adrServiceProp]);
+    const { navigateToResult: goToResult } = useSearchNavigation({ calmService, adrService });
 
-    const navigate = useNavigate();
-
+    // Results render inline while a query is present, so this keys off the query
+    // rather than the hook's `open` (dropdown) flag.
     const active = query.trim().length > 0;
-    const flatResults = useMemo(() => (results ? flattenResults(results) : []), [results]);
 
     useEffect(() => {
         onSearchingChange?.(active);
     }, [active, onSearchingChange]);
 
-    const performSearch = useCallback(
-        async (searchQuery: string) => {
-            if (!searchQuery.trim()) {
-                setResults(null);
-                setError(false);
-                return;
-            }
-
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-            }
-            const controller = new AbortController();
-            abortControllerRef.current = controller;
-
-            setLoading(true);
-            setError(false);
-            try {
-                const data = await service.search(searchQuery);
-                if (controller.signal.aborted) return;
-                setResults(data);
-                setSelectedIndex(-1);
-            } catch {
-                if (controller.signal.aborted) return;
-                setResults(null);
-                setError(true);
-            } finally {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            }
-        },
-        [service]
-    );
-
-    const handleInputChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const value = e.target.value;
-            setQuery(value);
-
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-
-            debounceRef.current = setTimeout(() => {
-                performSearch(value);
-            }, 300);
-        },
-        [performSearch]
-    );
-
-    const resolveLatestVersion = useCallback(
-        async (type: string, namespace: string, id: string): Promise<string> => {
-            let versions: (string | number)[];
-            switch (type) {
-                case 'architectures':
-                    versions = await calmService.fetchArchitectureVersions(namespace, id);
-                    break;
-                case 'patterns':
-                    versions = await calmService.fetchPatternVersions(namespace, id);
-                    break;
-                case 'flows':
-                    versions = await calmService.fetchFlowVersions(namespace, id);
-                    break;
-                case 'standards':
-                    versions = await calmService.fetchStandardVersions(namespace, id);
-                    break;
-                case 'adrs':
-                    versions = await adrService.fetchAdrRevisions(namespace, id);
-                    break;
-                default:
-                    throw new Error(`Unknown type: ${type}`);
-            }
-            const latest = pickLatestVersion((versions ?? []).map(String));
-            if (!latest) throw new Error('No versions found');
-            return latest;
-        },
-        [calmService, adrService]
-    );
-
     const navigateToResult = useCallback(
         (flatResult: FlatResult) => {
-            const { type, result } = flatResult;
-            setQuery('');
-            setResults(null);
-
-            if (type === 'controls') {
-                navigate(`/${result.namespace}/controls/${result.name}/detail`);
-                return;
-            }
-
-            if (type === 'interfaces') {
-                navigate(`/${result.namespace}/interfaces/${result.id}/detail`);
-                return;
-            }
-
-            const route = TYPE_ROUTES[type];
-            const id = String(result.id);
-            resolveLatestVersion(type, result.namespace, id)
-                .then((version) => {
-                    navigate(`/${result.namespace}/${route}/${id}/${version}`);
-                })
-                .catch(() => {
-                    navigate(`/${result.namespace}/${route}`);
-                });
+            clear();
+            goToResult(flatResult);
         },
-        [navigate, resolveLatestVersion]
+        [clear, goToResult]
     );
 
     const handleClear = useCallback(() => {
-        if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-        }
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
-        setQuery('');
-        setResults(null);
-        setSelectedIndex(-1);
-        setError(false);
+        clear();
         inputRef.current?.focus();
-    }, []);
+    }, [clear]);
 
     const handleKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
@@ -211,10 +70,10 @@ export function ExplorerSearch({
 
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                setSelectedIndex((prev) => (prev < flatResults.length - 1 ? prev + 1 : 0));
+                moveSelection(1);
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                setSelectedIndex((prev) => (prev > 0 ? prev - 1 : flatResults.length - 1));
+                moveSelection(-1);
             } else if (e.key === 'Enter' && selectedIndex >= 0) {
                 e.preventDefault();
                 navigateToResult(flatResults[selectedIndex]);
@@ -222,28 +81,15 @@ export function ExplorerSearch({
                 handleClear();
             }
         },
-        [active, flatResults, selectedIndex, navigateToResult, handleClear]
+        [active, flatResults, selectedIndex, moveSelection, navigateToResult, handleClear]
     );
-
-    useEffect(() => {
-        return () => {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-            }
-        };
-    }, []);
 
     const renderGroupedResults = () => {
         if (error) {
             return <div className="p-3 text-sm text-error">Search failed, please try again</div>;
         }
 
-        if (!results) {
-            return loading ? null : null;
-        }
+        if (!results) return null;
 
         const groups = Object.entries(results).filter(([, items]) => (items as SearchResult[]).length > 0);
 

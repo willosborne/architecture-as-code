@@ -1,45 +1,13 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IoSearchOutline, IoCloseOutline } from 'react-icons/io5';
 import { SearchService } from '../../service/search-service.js';
 import { CalmService } from '../../service/calm-service.js';
 import { AdrService } from '../../service/adr-service/adr-service.js';
-import { GroupedSearchResults, SearchResult } from '../../model/search.js';
-
-interface FlatResult {
-    type: string;
-    result: SearchResult;
-}
-
-const TYPE_LABELS: Record<string, string> = {
-    architectures: 'Architectures',
-    patterns: 'Patterns',
-    flows: 'Flows',
-    standards: 'Standards',
-    interfaces: 'Interfaces',
-    controls: 'Controls',
-    adrs: 'ADRs',
-};
-
-const TYPE_ROUTES: Record<string, string> = {
-    architectures: 'architectures',
-    patterns: 'patterns',
-    flows: 'flows',
-    standards: 'standards',
-    interfaces: 'interfaces',
-    controls: 'controls',
-    adrs: 'adrs',
-};
-
-function flattenResults(grouped: GroupedSearchResults): FlatResult[] {
-    const flat: FlatResult[] = [];
-    for (const [type, results] of Object.entries(grouped)) {
-        for (const result of results as SearchResult[]) {
-            flat.push({ type, result });
-        }
-    }
-    return flat;
-}
+import { SearchResult } from '../../model/search.js';
+import { FlatResult, TYPE_LABELS, useSearchNavigation } from '../../hooks/useSearchNavigation.js';
+import { useCatalogueSearch } from '../../hooks/useCatalogueSearch.js';
+import { colors } from '../../theme/colors.js';
 
 interface GlobalSearchBarProps {
     searchService?: SearchService;
@@ -48,191 +16,83 @@ interface GlobalSearchBarProps {
 }
 
 export function GlobalSearchBar({ searchService, calmService: calmServiceProp, adrService: adrServiceProp }: GlobalSearchBarProps) {
-    const [query, setQuery] = useState('');
-    const [results, setResults] = useState<GroupedSearchResults | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(false);
-    const [showDropdown, setShowDropdown] = useState(false);
-    const [selectedIndex, setSelectedIndex] = useState(-1);
+    const {
+        query,
+        results,
+        loading,
+        error,
+        open,
+        selectedIndex,
+        flatResults,
+        handleInputChange,
+        moveSelection,
+        clear,
+        closeDropdown,
+    } = useCatalogueSearch(searchService);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const abortControllerRef = useRef<AbortController | null>(null);
-    const service = useMemo(() => searchService ?? new SearchService(), [searchService]);
     const calmService = useMemo(() => calmServiceProp ?? new CalmService(), [calmServiceProp]);
     const adrService = useMemo(() => adrServiceProp ?? new AdrService(), [adrServiceProp]);
-
+    const { navigateToResult: goToResult } = useSearchNavigation({ calmService, adrService });
     const navigate = useNavigate();
-
-    const flatResults = results ? flattenResults(results) : [];
-
-    const performSearch = useCallback(async (searchQuery: string) => {
-        if (!searchQuery.trim()) {
-            setResults(null);
-            setShowDropdown(false);
-            setError(false);
-            return;
-        }
-
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
-
-        setLoading(true);
-        setError(false);
-        try {
-            const data = await service.search(searchQuery);
-            if (controller.signal.aborted) return;
-            setResults(data);
-            setShowDropdown(true);
-            setSelectedIndex(-1);
-        } catch {
-            if (controller.signal.aborted) return;
-            setResults(null);
-            setError(true);
-            setShowDropdown(true);
-        } finally {
-            if (!controller.signal.aborted) {
-                setLoading(false);
-            }
-        }
-    }, [service]);
-
-    const handleInputChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const value = e.target.value;
-            setQuery(value);
-
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-
-            debounceRef.current = setTimeout(() => {
-                performSearch(value);
-            }, 300);
-        },
-        [performSearch]
-    );
-
-    const resolveLatestVersion = useCallback(
-        async (type: string, namespace: string, id: string): Promise<string> => {
-            let versions: (string | number)[];
-            switch (type) {
-                case 'architectures':
-                    versions = await calmService.fetchArchitectureVersions(namespace, id);
-                    break;
-                case 'patterns':
-                    versions = await calmService.fetchPatternVersions(namespace, id);
-                    break;
-                case 'flows':
-                    versions = await calmService.fetchFlowVersions(namespace, id);
-                    break;
-                case 'standards':
-                    versions = await calmService.fetchStandardVersions(namespace, id);
-                    break;
-                case 'adrs':
-                    versions = await adrService.fetchAdrRevisions(namespace, id);
-                    break;
-                default:
-                    throw new Error(`Unknown type: ${type}`);
-            }
-            if (!versions || versions.length === 0) throw new Error('No versions found');
-            return String(versions[versions.length - 1]);
-        },
-        [calmService, adrService]
-    );
 
     const navigateToResult = useCallback(
         (flatResult: FlatResult) => {
-            const { type, result } = flatResult;
-            setShowDropdown(false);
-            setQuery('');
-            setResults(null);
-
-            if (type === 'controls') {
-                navigate(`/${result.namespace}/controls/${result.name}/detail`);
-                return;
-            }
-
-            if (type === 'interfaces') {
-                navigate(`/${result.namespace}/interfaces/${result.id}/detail`);
-                return;
-            }
-
-            const route = TYPE_ROUTES[type];
-            const id = String(result.id);
-            resolveLatestVersion(type, result.namespace, id)
-                .then((version) => {
-                    navigate(`/${result.namespace}/${route}/${id}/${version}`);
-                })
-                .catch(() => {
-                    navigate(`/${result.namespace}/${route}`);
-                });
+            clear();
+            goToResult(flatResult);
         },
-        [navigate, resolveLatestVersion]
+        [clear, goToResult]
     );
+
+    // `clear` also cancels the pending debounce, so no stray dropdown reopens after nav.
+    const submitQuery = useCallback(() => {
+        const trimmed = query.trim();
+        if (!trimmed) return;
+        clear();
+        navigate({ pathname: '/search', search: `?q=${encodeURIComponent(trimmed)}` });
+    }, [query, clear, navigate]);
 
     const handleKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
-            if (!showDropdown || flatResults.length === 0) return;
-
             if (e.key === 'ArrowDown') {
+                if (!open || flatResults.length === 0) return;
                 e.preventDefault();
-                setSelectedIndex((prev) => (prev < flatResults.length - 1 ? prev + 1 : 0));
+                moveSelection(1);
             } else if (e.key === 'ArrowUp') {
+                if (!open || flatResults.length === 0) return;
                 e.preventDefault();
-                setSelectedIndex((prev) => (prev > 0 ? prev - 1 : flatResults.length - 1));
-            } else if (e.key === 'Enter' && selectedIndex >= 0) {
+                moveSelection(-1);
+            } else if (e.key === 'Enter') {
                 e.preventDefault();
-                navigateToResult(flatResults[selectedIndex]);
+                // A highlighted preview result deep-links; otherwise submit the query.
+                if (open && selectedIndex >= 0 && flatResults[selectedIndex]) {
+                    navigateToResult(flatResults[selectedIndex]);
+                } else {
+                    submitQuery();
+                }
             } else if (e.key === 'Escape') {
-                setShowDropdown(false);
-                setSelectedIndex(-1);
+                closeDropdown();
             }
         },
-        [showDropdown, flatResults, selectedIndex, navigateToResult]
+        [open, flatResults, selectedIndex, moveSelection, navigateToResult, submitQuery, closeDropdown]
     );
 
     const handleClear = useCallback(() => {
-        if (debounceRef.current) {
-            clearTimeout(debounceRef.current);
-        }
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-        }
-        setQuery('');
-        setResults(null);
-        setShowDropdown(false);
-        setSelectedIndex(-1);
-        setError(false);
+        clear();
         inputRef.current?.focus();
-    }, []);
+    }, [clear]);
 
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setShowDropdown(false);
-                setSelectedIndex(-1);
+                closeDropdown();
             }
         }
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
-
-    useEffect(() => {
-        return () => {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-            }
-        };
-    }, []);
+    }, [closeDropdown]);
 
     const renderGroupedResults = () => {
         if (error) {
@@ -253,7 +113,10 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
 
         return groups.map(([type, items]) => (
             <div key={type}>
-                <div className="px-3 py-1 text-xs font-semibold text-base-content/50 uppercase tracking-wide bg-base-200">
+                <div
+                    className="px-3 py-1 font-mono-jb text-[10px] uppercase tracking-[0.1em]"
+                    style={{ color: colors.redesign.faintAlt, backgroundColor: colors.redesign.surface }}
+                >
                     {TYPE_LABELS[type] ?? type}
                 </div>
                 {(items as SearchResult[]).map((item) => {
@@ -268,9 +131,33 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
                             role="option"
                             aria-selected={currentIndex === selectedIndex}
                         >
-                            <div className="font-medium text-base-content">{item.name}</div>
+                            {/* Name + a right-aligned mono namespace chip so duplicate
+                                names across namespaces (problem #9) are distinguishable.
+                                No version chip: SearchResult carries no version and
+                                resolving it per result would be an N+1 — deferred. */}
+                            <div className="flex items-center gap-2">
+                                <span
+                                    className="font-medium truncate min-w-0"
+                                    style={{ color: colors.redesign.ink }}
+                                >
+                                    {item.name}
+                                </span>
+                                <span
+                                    data-testid="result-namespace-chip"
+                                    className="ml-auto shrink-0 font-mono-jb text-[10px] rounded-[6px] px-1.5 py-0.5"
+                                    style={{
+                                        backgroundColor: colors.redesign.badgeBg,
+                                        color: colors.redesign.mutedAlt,
+                                    }}
+                                >
+                                    {item.namespace}
+                                </span>
+                            </div>
                             {item.description && (
-                                <div className="text-xs text-base-content/60 truncate">
+                                <div
+                                    className="text-xs truncate mt-0.5"
+                                    style={{ color: colors.redesign.mutedAlt }}
+                                >
                                     {item.description}
                                 </div>
                             )}
@@ -295,7 +182,7 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
                     onKeyDown={handleKeyDown}
                     aria-label="Search"
                     role="combobox"
-                    aria-expanded={showDropdown}
+                    aria-expanded={open}
                     aria-haspopup="listbox"
                 />
                 {query && (
@@ -311,7 +198,7 @@ export function GlobalSearchBar({ searchService, calmService: calmServiceProp, a
                     <span className="loading loading-spinner loading-xs text-base-content/50" />
                 )}
             </div>
-            {showDropdown && (
+            {open && (
                 <div
                     className="absolute right-0 top-full mt-1 w-80 max-w-[calc(100vw-2rem)] max-h-96 overflow-y-auto bg-base-100 border border-base-300 rounded-lg shadow-lg z-50"
                     role="listbox"

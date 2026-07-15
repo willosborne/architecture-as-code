@@ -10,13 +10,15 @@ import org.dizitart.no2.collection.NitriteCollection;
 import org.dizitart.no2.filters.Filter;
 import org.finos.calm.config.StandaloneQualifier;
 import org.finos.calm.domain.Architecture;
-import org.finos.calm.domain.architecture.NamespaceArchitectureSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.domain.exception.ArchitectureNotFoundException;
 import org.finos.calm.domain.exception.ArchitectureVersionExistsException;
 import org.finos.calm.domain.exception.ArchitectureVersionNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.store.ArchitectureStore;
+import org.finos.calm.store.PageRequest;
 import org.finos.calm.store.util.TypeSafeNitriteDocument;
+import org.finos.calm.store.util.VersionKeySelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,7 +63,7 @@ public class NitriteArchitectureStore implements ArchitectureStore {
     }
 
     @Override
-    public List<NamespaceArchitectureSummary> getArchitecturesForNamespace(String namespace) throws NamespaceNotFoundException {
+    public List<NamespaceResourceSummary> getArchitecturesForNamespace(String namespace, PageRequest page) throws NamespaceNotFoundException {
         if (!namespaceStore.namespaceExists(namespace)) {
             LOG.warn("Namespace '{}' not found when retrieving architectures", namespace);
             throw new NamespaceNotFoundException();
@@ -73,21 +75,26 @@ public class NitriteArchitectureStore implements ArchitectureStore {
             return List.of();
         }
 
-        List<NamespaceArchitectureSummary> architectureSummaries = new ArrayList<>();
+        List<NamespaceResourceSummary> architectureSummaries = new ArrayList<>();
         for (Document architecture : architectures) {
             Integer archId = architecture.get(ARCHITECTURE_ID_FIELD, Integer.class);
             String name = architecture.get(NAME_FIELD, String.class);
             String description = architecture.get(DESCRIPTION_FIELD, String.class);
             if (name == null) name = "Architecture " + archId;
             if (description == null) description = "";
-            NamespaceArchitectureSummary summary = new NamespaceArchitectureSummary(
-                    name, description, archId
+            // Count versions from the already-in-memory sub-document (O(1), no extra query).
+            Object rawVersions = architecture.get(VERSIONS_FIELD);
+            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+            NamespaceResourceSummary summary = new NamespaceResourceSummary(
+                    name, description, archId, versionCount
             );
             architectureSummaries.add(summary);
         }
 
-        LOG.debug("Retrieved {} architectures for namespace '{}'", architectureSummaries.size(), namespace);
-        return architectureSummaries;
+        // Nitrite has no array-slice projection, so apply the limit/offset window in memory.
+        List<NamespaceResourceSummary> pageResults = page.apply(architectureSummaries);
+        LOG.debug("Retrieved {} of {} architectures for namespace '{}'", pageResults.size(), architectureSummaries.size(), namespace);
+        return pageResults;
     }
 
     @Override

@@ -8,12 +8,13 @@ import io.quarkus.test.security.TestSecurity;
 import org.bson.json.JsonParseException;
 import org.finos.calm.domain.Architecture;
 import org.finos.calm.domain.architecture.ArchitectureRequest;
-import org.finos.calm.domain.architecture.NamespaceArchitectureSummary;
+import org.finos.calm.domain.namespaces.NamespaceResourceSummary;
 import org.finos.calm.domain.exception.ArchitectureNotFoundException;
 import org.finos.calm.domain.exception.ArchitectureVersionExistsException;
 import org.finos.calm.domain.exception.ArchitectureVersionNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.store.ArchitectureStore;
+import org.finos.calm.store.PageRequest;
 import org.finos.calm.store.TimelineStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,10 +27,13 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static io.restassured.RestAssured.given;
+import static org.finos.calm.resources.ResourceValidationConstants.LIMIT_MESSAGE;
 import static org.finos.calm.resources.ResourceValidationConstants.NAMESPACE_MESSAGE;
+import static org.finos.calm.resources.ResourceValidationConstants.OFFSET_MESSAGE;
 import static org.finos.calm.resources.ResourceValidationConstants.VERSION_MESSAGE;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -50,7 +54,7 @@ public class TestArchitectureResourceShould {
 
     @Test
     void return_a_404_when_an_invalid_namespace_is_provided_on_get_architectures() throws NamespaceNotFoundException {
-        when(mockArchitectureStore.getArchitecturesForNamespace(anyString())).thenThrow(new NamespaceNotFoundException());
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenThrow(new NamespaceNotFoundException());
 
         given()
                 .when()
@@ -58,7 +62,7 @@ public class TestArchitectureResourceShould {
                 .then()
                 .statusCode(404);
 
-        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("invalid");
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("invalid", PageRequest.UNPAGED);
     }
 
     @Test
@@ -73,11 +77,11 @@ public class TestArchitectureResourceShould {
 
     @Test
     void return_list_of_architecture_ids_when_valid_namespace_provided_on_get_architectures() throws NamespaceNotFoundException {
-        List<NamespaceArchitectureSummary> summaries = List.of(
-                new NamespaceArchitectureSummary("Arch One", "First architecture", 12345),
-                new NamespaceArchitectureSummary("Arch Two", "Second architecture", 54321)
+        List<NamespaceResourceSummary> summaries = List.of(
+                new NamespaceResourceSummary("Arch One", "First architecture", 12345, 3),
+                new NamespaceResourceSummary("Arch Two", "Second architecture", 54321, 1)
         );
-        when(mockArchitectureStore.getArchitecturesForNamespace(anyString())).thenReturn(summaries);
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenReturn(summaries);
 
         given()
                 .when()
@@ -87,11 +91,46 @@ public class TestArchitectureResourceShould {
                 .body("values[0].name", equalTo("Arch One"))
                 .body("values[0].description", equalTo("First architecture"))
                 .body("values[0].id", equalTo(12345))
+                .body("values[0].versionCount", equalTo(3))
                 .body("values[1].name", equalTo("Arch Two"))
                 .body("values[1].description", equalTo("Second architecture"))
-                .body("values[1].id", equalTo(54321));
+                .body("values[1].id", equalTo(54321))
+                .body("values[1].versionCount", equalTo(1));
 
-        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos");
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos", PageRequest.UNPAGED);
+    }
+
+    @Test
+    void pass_limit_and_offset_to_store_when_provided_on_get_architectures() throws NamespaceNotFoundException {
+        when(mockArchitectureStore.getArchitecturesForNamespace(anyString(), any())).thenReturn(List.of());
+
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?limit=3&offset=6")
+                .then()
+                .statusCode(200);
+
+        verify(mockArchitectureStore, times(1)).getArchitecturesForNamespace("finos", new PageRequest(3, 6));
+    }
+
+    @Test
+    void return_a_400_when_limit_is_less_than_one_on_get_architectures() {
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?limit=0")
+                .then()
+                .statusCode(400)
+                .body(containsString(LIMIT_MESSAGE));
+    }
+
+    @Test
+    void return_a_400_when_offset_is_negative_on_get_architectures() {
+        given()
+                .when()
+                .get("/api/calm/namespaces/finos/architectures?offset=-1")
+                .then()
+                .statusCode(400)
+                .body(containsString(OFFSET_MESSAGE));
     }
 
     @Test
