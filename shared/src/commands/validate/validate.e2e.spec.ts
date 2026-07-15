@@ -82,6 +82,20 @@ describe('validate E2E', () => {
         expect(response.spectralSchemaValidationOutputs[1].path).toBe('/nodes/1/description');
     });
 
+    it('produces the same outcome when the same pattern object is validated repeatedly', async () => {
+        // Long-lived processes (e.g. calm-server) cache pattern objects and reuse
+        // them across validations, so validating must not mutate the pattern.
+        const inputPattern = JSON.parse(readFileSync(inputPatternPath, 'utf-8'));
+        const inputArch = JSON.parse(readFileSync(inputArchPath, 'utf-8'));
+        const patternBeforeValidation = structuredClone(inputPattern);
+
+        const firstResponse = await validate(inputArch, inputPattern, undefined, schemaDirectory, false);
+        const secondResponse = await validate(inputArch, inputPattern, undefined, schemaDirectory, false);
+
+        expect(inputPattern).toEqual(patternBeforeValidation);
+        expect(secondResponse).toEqual(firstResponse);
+    });
+
     it('reports json schema compilation errors for bad-json-schema fixture', async () => {
         const badPattern = JSON.parse(readFileSync(badPatternPath, 'utf-8'));
         const inputArch = JSON.parse(readFileSync(inputArchPath, 'utf-8'));
