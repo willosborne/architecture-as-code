@@ -1,0 +1,33 @@
+name: "Release Parent POM to Maven Central"
+
+on:
+    workflow_dispatch:
+
+jobs:
+    publish-parent:
+        name: Publish Parent POM
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup JDK 21 and auto-generate Sonatype settings
+              uses: actions/setup-java@v4
+              with:
+                distribution: 'temurin'
+                java-version: '21'
+                server-id: central
+                server-username: CI_DEPLOY_USERNAME
+                server-password: CI_DEPLOY_PASSWORD
+                gpg-private-key: ${{ secrets.CI_GPG_PRIVATE_KEY }}
+
+            - name: Execute Parent Deploy (Non-recursive)
+              run: |
+                # -N (non-recursive) deploys only this root parent POM, ignoring submodules
+                ./mvnw -B clean deploy -N \
+                  -Prelease \
+                  -DskipTests
+              env:
+                CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
+                CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
+                MAVEN_GPG_PASSPHRASE: ${{ secrets.CI_GPG_PASSPHRASE }}
