@@ -5,6 +5,9 @@ on:
     push:
         branches:
             - 'release/calm-models-*'
+            
+permissions:
+    contents: write
 
 jobs:
     publish-central:
