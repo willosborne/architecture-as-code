@@ -384,7 +384,7 @@
                               "const": "https://calm.finos.org/getting-started/controls/permitted-connection.requirement.json"
                             },
                             "config-url": {
-                              "const": "https://calm.finos.org/getting-started/controls/permitted-connection-jdbc.config.json"
+                              "const": "https://calm.finos.org/getting-started/controls/permitted-connection-http.config.json"
                             }
                           }
                         }
