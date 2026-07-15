@@ -27,6 +27,8 @@ calm docify \
   --template-dir ./templates
 ```
 
+Add `--export-diagrams <svg|png>` to render the generated Mermaid diagrams to image files (via a local Chromium-based browser) instead of leaving them as Mermaid code blocks. See **calm-cli-instructions.md** for the full set of docify options.
+
 ### 2. Custom Templates
 
 Create Handlebars templates for custom documentation:

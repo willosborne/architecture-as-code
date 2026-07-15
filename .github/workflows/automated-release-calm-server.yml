@@ -429,7 +429,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event.pull_request.merged == true &&
-      contains(github.event.pull_request.labels.*.name, 'automated-release')
+      contains(github.event.pull_request.labels.*.name, 'automated-release') &&
+      startsWith(github.event.pull_request.head.ref, 'release/calm-server-v')
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2

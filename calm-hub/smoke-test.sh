@@ -29,6 +29,7 @@
 #   GET    /api/calm/namespaces/workshop/architectures       -> 200 + body contains "name","description"
 #   GET    /api/calm/namespaces/finos.traderx/architectures  -> 200 + body contains "name"
 #   Conference Signup Pattern: versions list contains "1.0.0" and "2.0.0" (uses jq)
+#   GET    /calm/search?q=conference                        -> 200 + body contains "architectures","Conference Signup Pattern"
 #   POST   /api/calm/namespaces                             -> 405  (blocked by ReadOnlyRequestFilter)
 #   PUT    /api/calm/namespaces/smoke                       -> 405
 #   DELETE /api/calm/namespaces/smoke                       -> 405
@@ -45,6 +46,7 @@
 #   GET    /calm/namespaces/smoke-test/architectures/smoke-arch/versions -> 200
 #   GET    /calm/namespaces/smoke-test/architectures/smoke-arch/versions/1.0.0  -> 200
 #   GET    /calm/namespaces/smoke-test/architectures/smoke-arch/versions/1.0.0  body contains "$id"
+#   GET    /calm/search?q=smoke                                          -> 200 + body contains "architectures"
 #   PUT    /calm                                                         -> 403  (allow.put.operations=false)
 #
 # Readiness polling uses /q/swagger-ui rather than /q/health/ready because the
@@ -160,6 +162,13 @@ if [[ "${MODE}" == "readonly" ]]; then
     assert_body_contains GET "/api/calm/namespaces/workshop/patterns/${conf_pattern_id}/versions" '"1.0.0"'
     assert_body_contains GET "/api/calm/namespaces/workshop/patterns/${conf_pattern_id}/versions" '"2.0.0"'
 
+    # Global search — native @RegisterForReflection guard: '"architectures"' (always
+    # present on a correct response) catches the {} regression; the pattern hit proves
+    # a populated SearchResult serializes.
+    assert GET '/calm/search?q=conference' 200
+    assert_body_contains GET '/calm/search?q=conference' '"architectures"'
+    assert_body_contains GET '/calm/search?q=conference' '"Conference Signup Pattern"'
+
     # All mutating methods must be blocked on both API surfaces
     assert POST   /api/calm/namespaces       405 -H 'Content-Type: application/json' -d '{"name":"smoke-test","description":"smoke test namespace"}'
     assert PUT    /api/calm/namespaces/smoke  405
@@ -191,6 +200,11 @@ else
     assert GET /calm/namespaces/smoke-test/architectures/smoke-arch/versions/1.0.0 200
     # The returned document must carry $id rewritten to the canonical versioned URL
     assert_body_contains GET /calm/namespaces/smoke-test/architectures/smoke-arch/versions/1.0.0 '"$id"'
+
+    # Global search reachable + returns the grouped envelope. (The native {} regression
+    # is guarded in the readonly block; on a JVM container this always passes.)
+    assert GET '/calm/search?q=smoke' 200
+    assert_body_contains GET '/calm/search?q=smoke' '"architectures"'
 
     # PUT /calm must return 403 when allow.put.operations=false (the default)
     assert PUT /calm 403 -H 'Content-Type: application/json' -d '{}'

@@ -1,7 +1,12 @@
 package org.finos.calm.domain.search;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.util.Objects;
 
+// Returned via an opaque Response, so without this the native image strips its
+// reflection metadata and Jackson serializes it as {}.
+@RegisterForReflection
 public class SearchResult {
     private final String namespace;
     private final int id;

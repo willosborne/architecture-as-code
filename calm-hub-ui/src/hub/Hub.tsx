@@ -5,7 +5,8 @@ import { ExploreRail } from './components/explore-rail/ExploreRail.js';
 import { MobileNavMenu } from './components/tree-navigation/MobileNavMenu.js';
 import { NamespacePage } from './components/namespace-page/NamespacePage.js';
 import { DomainPage } from './components/domain-page/DomainPage.js';
-import { FirstRunLanding } from './components/first-run-landing/FirstRunLanding.js';
+import { IntroScreen } from './components/intro-screen/IntroScreen.js';
+import { SearchResultsPage } from './components/search-results/SearchResultsPage.js';
 import { useResourceFromRoute } from './hooks/useResourceFromRoute.js';
 import { useIsMobile } from '../hooks/useMediaQuery.js';
 import { BreadcrumbItem, Data, Adr } from '../model/calm.js';
@@ -76,9 +77,11 @@ export default function Hub() {
     const namespaceMatch = useMatch('/namespace/:ns');
     const domainMatch = useMatch('/domain/:domain');
     const detailMatch = useMatch('/:namespace/:type/:id/:version');
+    const searchMatch = useMatch('/search');
     const activeNamespace = namespaceMatch?.params.ns;
     const activeDomain = domainMatch?.params.domain;
     const isDetailRoute = detailMatch !== null;
+    const isSearchRoute = searchMatch !== null;
 
     const countsService = useMemo(() => new CountsService(), []);
 
@@ -106,6 +109,13 @@ export default function Hub() {
             .catch(() => setDomainCounts([]))
             .finally(() => setDomainCountsLoaded(true));
     }, [countsService]);
+
+    // The mobile drill-down overlay defaults open and would otherwise cover the
+    // results on /search. Close it on route entry (a layout effect, so a direct
+    // mobile /search load doesn't flash the overlay); the Explore bar can reopen it.
+    useLayoutEffect(() => {
+        if (isSearchRoute) setIsMobileNavOpen(false);
+    }, [isSearchRoute]);
 
     useEffect(() => {
         return authStore.subscribe((status) => {
@@ -332,6 +342,21 @@ export default function Hub() {
         [domainCounts, domainCountsLoaded, controlDomain]
     );
 
+    // Chrome-free intro / front door (`/` with nothing else active): early-returns
+    // before Hub's navbar + rail layout. Below every hook above, so none is skipped.
+    if (
+        !activeNamespace &&
+        !activeDomain &&
+        !isDetailRoute &&
+        !isSearchRoute &&
+        !data &&
+        !adrData &&
+        !controlData &&
+        !interfaceData
+    ) {
+        return <IntroScreen namespaceCounts={namespaceCounts} domainCounts={domainCounts} />;
+    }
+
     const detailContent = interfaceData ? (
         <InterfaceDetailSection interfaceData={interfaceData} />
     ) : adrData ? (
@@ -386,14 +411,8 @@ export default function Hub() {
             onControlLoad={handleControlLoad}
         />
     ) : (
-        <FirstRunLanding
-            namespaceCounts={namespaceCounts}
-            domainCounts={domainCounts}
-            // Ready only once both fetches have settled AND the namespace fetch didn't
-            // fail: the tiles include a Controls total from domainCounts, and a failed
-            // namespace fetch is unknown, not zero — hold the placeholder in both cases.
-            countsLoaded={namespaceCountsLoaded && domainCountsLoaded && !namespaceCountsFailed}
-        />
+        // Only reached on `/search` (the bare-`/` intro early-returns above).
+        <SearchResultsPage />
     );
 
     return (

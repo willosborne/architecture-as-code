@@ -1,6 +1,6 @@
 {
     "name": "@finos/calm-server",
-    "version": "0.3.0",
+    "version": "0.3.3",
     "description": "CALM Server - A server implementation for the Common Architecture Language Model",
     "homepage": "https://calm.finos.org",
     "repository": {
@@ -29,11 +29,11 @@
     "author": "",
     "license": "Apache-2.0",
     "dependencies": {
-        "@finos/calm-shared": "file:../shared",
         "commander": "^14.0.0",
         "copyfiles": "^2.4.1",
         "express": "^4.18.2",
-        "express-rate-limit": "^8.5.0"
+        "express-rate-limit": "^8.5.0",
+        "ts-node": "10.9.2"
     },
     "devDependencies": {
         "@types/express": "^5.0.0",
