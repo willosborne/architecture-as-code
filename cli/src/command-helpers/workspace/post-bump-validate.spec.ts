@@ -1,0 +1,159 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdir, writeFile, rm } from 'fs/promises';
+import path from 'path';
+
+// vi.mock is hoisted to the top of the file by vitest, so factories must not reference
+// variables declared in the module scope. We store captured spies via vi.hoisted() instead.
+const { mockValidate, mockLoadSchemas } = vi.hoisted(() => ({
+    mockValidate: vi.fn(),
+    mockLoadSchemas: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@finos/calm-shared', () => ({
+    CALM_META_SCHEMA_DIRECTORY: '/mock/schema/dir',
+    buildDocumentLoader: vi.fn().mockReturnValue({}),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    SchemaDirectory: vi.fn().mockImplementation(function(this: any) { this.loadSchemas = mockLoadSchemas; }),
+    validate: (...args: unknown[]) => mockValidate(...args),
+}));
+
+import { runPostBumpValidation } from './post-bump-validate';
+
+// Build a minimal ValidationOutcome-like object for the mocked validate function.
+const makeOutcome = (errors: number) => ({
+    hasErrors: errors > 0,
+    hasWarnings: false,
+    jsonSchemaValidationOutputs: Array.from({ length: errors }, () => ({ severity: 'error', message: 'err', code: 'E', path: '/', source: 'architecture' })),
+    spectralSchemaValidationOutputs: [],
+    allValidationOutputs() {
+        return [...this.jsonSchemaValidationOutputs, ...this.spectralSchemaValidationOutputs];
+    },
+});
+
+describe('runPostBumpValidation', () => {
+    const bundlePath = path.join(__dirname, 'test-post-bump-validate');
+    const filesPath = path.join(bundlePath, 'files');
+
+    beforeEach(async () => {
+        vi.clearAllMocks();
+        mockLoadSchemas.mockResolvedValue(undefined);
+        await mkdir(filesPath, { recursive: true });
+    });
+
+    afterEach(async () => {
+        await rm(bundlePath, { recursive: true, force: true });
+    });
+
+    const write = (name: string, obj: object) =>
+        writeFile(path.join(filesPath, name), JSON.stringify(obj), 'utf8');
+
+    it('returns passed:true for an architecture that validates without errors', async () => {
+        await write('arch.json', { $id: 'test', title: 'Arch' });
+        mockValidate.mockResolvedValue(makeOutcome(0));
+
+        const results = await runPostBumpValidation(bundlePath, {
+            'my-arch': { path: 'files/arch.json', type: 'architecture' },
+        });
+
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({ id: 'my-arch', type: 'architecture', passed: true, errorCount: 0 });
+    });
+
+    it('returns passed:false with errorCount for an architecture that has errors', async () => {
+        await write('arch.json', { $id: 'test', title: 'Arch' });
+        mockValidate.mockResolvedValue(makeOutcome(3));
+
+        const results = await runPostBumpValidation(bundlePath, {
+            'my-arch': { path: 'files/arch.json', type: 'architecture' },
+        });
+
+        expect(results[0]).toMatchObject({ passed: false, errorCount: 3 });
+    });
+
+    it('calls validate with pattern slot for a pattern entry', async () => {
+        await write('pat.json', { $id: 'test', title: 'Pat' });
+        mockValidate.mockResolvedValue(makeOutcome(0));
+
+        await runPostBumpValidation(bundlePath, {
+            'my-pattern': { path: 'files/pat.json', type: 'pattern' },
+        });
+
+        // validate(undefined, patternContent, undefined, schemaDir, false) — pattern is 2nd arg
+        expect(mockValidate).toHaveBeenCalledWith(
+            undefined,
+            expect.objectContaining({ $id: 'test' }),
+            undefined,
+            expect.anything(),
+            false
+        );
+    });
+
+    it('calls validate with architecture slot for an architecture entry', async () => {
+        await write('arch.json', { $id: 'test', title: 'Arch' });
+        mockValidate.mockResolvedValue(makeOutcome(0));
+
+        await runPostBumpValidation(bundlePath, {
+            'my-arch': { path: 'files/arch.json', type: 'architecture' },
+        });
+
+        // validate(archContent, undefined, undefined, schemaDir, false)
+        expect(mockValidate).toHaveBeenCalledWith(
+            expect.objectContaining({ $id: 'test' }),
+            undefined,
+            undefined,
+            expect.anything(),
+            false
+        );
+    });
+
+    it('skips non-architecture and non-pattern document types', async () => {
+        mockValidate.mockResolvedValue(makeOutcome(0));
+
+        const results = await runPostBumpValidation(bundlePath, {
+            'my-flow': { path: 'files/flow.json', type: 'flow' },
+            'my-adr': { path: 'files/adr.json', type: 'adr' },
+            'my-timeline': { path: 'files/tl.json', type: 'timeline' },
+        });
+
+        expect(results).toHaveLength(0);
+        expect(mockValidate).not.toHaveBeenCalled();
+    });
+
+    it('returns passed:false with errorCount:-1 when a file cannot be read', async () => {
+        const results = await runPostBumpValidation(bundlePath, {
+            'missing': { path: 'files/does-not-exist.json', type: 'architecture' },
+        });
+
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({ id: 'missing', passed: false, errorCount: -1 });
+        expect(mockValidate).not.toHaveBeenCalled();
+    });
+
+    it('returns passed:false with errorCount:-1 when validate throws', async () => {
+        await write('arch.json', { $id: 'test', title: 'Arch' });
+        mockValidate.mockRejectedValue(new Error('schema load failure'));
+
+        const results = await runPostBumpValidation(bundlePath, {
+            'my-arch': { path: 'files/arch.json', type: 'architecture' },
+        });
+
+        expect(results[0]).toMatchObject({ passed: false, errorCount: -1 });
+    });
+
+    it('processes multiple docs and reports each independently', async () => {
+        await write('a.json', { $id: 'a', title: 'A' });
+        await write('b.json', { $id: 'b', title: 'B' });
+        mockValidate
+            .mockResolvedValueOnce(makeOutcome(0))  // a passes
+            .mockResolvedValueOnce(makeOutcome(2));  // b fails
+
+        const results = await runPostBumpValidation(bundlePath, {
+            'a': { path: 'files/a.json', type: 'architecture' },
+            'b': { path: 'files/b.json', type: 'pattern' },
+        });
+
+        expect(results).toHaveLength(2);
+        expect(results.find(r => r.id === 'a')).toMatchObject({ passed: true });
+        expect(results.find(r => r.id === 'b')).toMatchObject({ passed: false, errorCount: 2 });
+    });
+});

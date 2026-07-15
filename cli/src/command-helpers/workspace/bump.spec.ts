@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { detectChangedResources, bumpWorkspace, canonicalEqual } from './bump';
+import { detectChangedResources, bumpWorkspace, canonicalEqual, maxIncrement } from './bump';
 import { saveManifest } from './bundle';
-import { CalmHubClient } from '@finos/calm-shared/src/hub/calm-hub-client';
+import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/calm-hub-client';
 import { mkdir, writeFile, rm, readFile } from 'fs/promises';
 import path from 'path';
 
@@ -268,6 +268,150 @@ describe('bump', () => {
 
             expect(second.bumped).toHaveLength(0);
             expect((await read('a.json')).$id).toBe(idAt('a', '1.1.0'));
+        });
+
+        it('applies different per-document increments for each directly-changed doc', async () => {
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
+            await write('b.json', { $id: idAt('b', '2.0.0', 'patterns'), title: 'B', extra: 'edited' });
+            await saveManifest(bundlePath, {
+                'a': { path: 'files/a.json', type: 'architecture' },
+                'b': { path: 'files/b.json', type: 'pattern' },
+            });
+            const client = makeClient({
+                versions: { a: ['1.0.0'], b: ['2.0.0'] },
+                remote: {
+                    'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A' },
+                    'b@2.0.0': { $id: idAt('b', '2.0.0', 'patterns'), title: 'B' },
+                },
+            });
+
+            const perDocIncrements = new Map([
+                ['a', 'PATCH' as const],
+                ['b', 'MAJOR' as const],
+            ]);
+            const changedResources = await detectChangedResources(bundlePath, client);
+            const result = await bumpWorkspace(bundlePath, client, {
+                increment: 'MINOR',
+                perDocIncrements,
+                preDetectedChanges: changedResources,
+            });
+
+            expect(result.bumped.find(b => b.id === 'a')).toMatchObject({ toVersion: '1.0.1', increment: 'PATCH' });
+            expect(result.bumped.find(b => b.id === 'b')).toMatchObject({ toVersion: '3.0.0', increment: 'MAJOR' });
+            expect((await read('a.json')).$id).toBe(idAt('a', '1.0.1'));
+            expect((await read('b.json')).$id).toBe(idAt('b', '3.0.0', 'patterns'));
+        });
+
+        it('cascade-bumped doc receives the trigger increment via getCascadeIncrement callback', async () => {
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
+            const bDoc = { $id: idAt('b', '1.0.0'), title: 'B', nodes: [{ $ref: idAt('a', '1.0.0') }] };
+            await write('b.json', bDoc);
+            await saveManifest(bundlePath, {
+                'a': { path: 'files/a.json', type: 'architecture' },
+                'b': { path: 'files/b.json', type: 'architecture' },
+            });
+            const client = makeClient({
+                versions: { a: ['1.0.0'], b: ['1.0.0'] },
+                remote: { 'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A' }, 'b@1.0.0': bDoc },
+            });
+
+            const cascadeCalls: Array<{ docId: string; triggeredBy: string; defaultIncrement: string }> = [];
+            const changedResources = await detectChangedResources(bundlePath, client);
+            const result = await bumpWorkspace(bundlePath, client, {
+                increment: 'MINOR',
+                perDocIncrements: new Map([['a', 'MAJOR']]),
+                preDetectedChanges: changedResources,
+                getCascadeIncrement: async (docId, triggeredBy, defaultIncrement) => {
+                    cascadeCalls.push({ docId, triggeredBy, defaultIncrement });
+                    return defaultIncrement; // accept the default
+                },
+            });
+
+            // B cascaded because A was bumped; its default should have been MAJOR (from A)
+            expect(cascadeCalls).toHaveLength(1);
+            expect(cascadeCalls[0]).toMatchObject({ docId: 'b', defaultIncrement: 'MAJOR' });
+            expect(result.bumped.find(b => b.id === 'b')).toMatchObject({ toVersion: '2.0.0', increment: 'MAJOR' });
+            expect((await read('b.json')).$id).toBe(idAt('b', '2.0.0'));
+        });
+
+        it('getCascadeIncrement can override the cascade default', async () => {
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
+            const bDoc = { $id: idAt('b', '1.0.0'), title: 'B', nodes: [{ $ref: idAt('a', '1.0.0') }] };
+            await write('b.json', bDoc);
+            await saveManifest(bundlePath, {
+                'a': { path: 'files/a.json', type: 'architecture' },
+                'b': { path: 'files/b.json', type: 'architecture' },
+            });
+            const client = makeClient({
+                versions: { a: ['1.0.0'], b: ['1.0.0'] },
+                remote: { 'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A' }, 'b@1.0.0': bDoc },
+            });
+
+            const changedResources = await detectChangedResources(bundlePath, client);
+            const result = await bumpWorkspace(bundlePath, client, {
+                increment: 'MINOR',
+                perDocIncrements: new Map([['a', 'MAJOR']]),
+                preDetectedChanges: changedResources,
+                // User chose PATCH for the cascade despite the MAJOR default
+                getCascadeIncrement: async () => 'PATCH',
+            });
+
+            expect(result.bumped.find(b => b.id === 'b')).toMatchObject({ toVersion: '1.0.1', increment: 'PATCH' });
+        });
+
+        it('maxIncrement with mixed triggers returns the highest', async () => {
+            // Three-level chain: A=PATCH, B=MINOR → C's default should be MINOR (max of A's/B's applied)
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
+            await write('b.json', { $id: idAt('b', '1.0.0'), title: 'B', extra: 'edited' });
+            const cDoc = {
+                $id: idAt('c', '1.0.0'), title: 'C',
+                nodes: [{ $ref: idAt('a', '1.0.0') }, { $ref: idAt('b', '1.0.0') }],
+            };
+            await write('c.json', cDoc);
+            await saveManifest(bundlePath, {
+                'a': { path: 'files/a.json', type: 'architecture' },
+                'b': { path: 'files/b.json', type: 'architecture' },
+                'c': { path: 'files/c.json', type: 'architecture' },
+            });
+            const client = makeClient({
+                versions: { a: ['1.0.0'], b: ['1.0.0'], c: ['1.0.0'] },
+                remote: {
+                    'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A' },
+                    'b@1.0.0': { $id: idAt('b', '1.0.0'), title: 'B' },
+                    'c@1.0.0': cDoc,
+                },
+            });
+
+            const seenDefaults: ResourceChangeType[] = [];
+            const changedResources = await detectChangedResources(bundlePath, client);
+            await bumpWorkspace(bundlePath, client, {
+                increment: 'MINOR',
+                perDocIncrements: new Map<string, ResourceChangeType>([['a', 'PATCH'], ['b', 'MINOR']]),
+                preDetectedChanges: changedResources,
+                getCascadeIncrement: async (_docId, _triggeredBy, defaultIncrement) => {
+                    seenDefaults.push(defaultIncrement);
+                    return defaultIncrement;
+                },
+            });
+
+            // C is triggered by both A (PATCH) and B (MINOR) in one pass; max is MINOR
+            expect(seenDefaults).toContain('MINOR');
+            expect(seenDefaults).not.toContain('MAJOR');
+        });
+    });
+
+    describe('maxIncrement', () => {
+        it('returns MAJOR when MAJOR is present', () => {
+            expect(maxIncrement(['PATCH', 'MAJOR', 'MINOR'])).toBe('MAJOR');
+        });
+        it('returns MINOR when MINOR is present but not MAJOR', () => {
+            expect(maxIncrement(['PATCH', 'MINOR'])).toBe('MINOR');
+        });
+        it('returns PATCH when only PATCH is present', () => {
+            expect(maxIncrement(['PATCH'])).toBe('PATCH');
+        });
+        it('returns PATCH for an empty list', () => {
+            expect(maxIncrement([])).toBe('PATCH');
         });
     });
 });

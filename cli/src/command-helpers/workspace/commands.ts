@@ -8,6 +8,7 @@ import { createNewDocument, getTemplatesForType } from './new';
 import { promptForDocumentId } from './document-id-prompt';
 import { pushWorkspaceToHub } from './push';
 import { detectChangedResources, bumpWorkspace } from './bump';
+import { runPostBumpValidation } from './post-bump-validate';
 import { loadWorkspaceConfig } from './config';
 import { findWorkspaceManifestPath, findGitRoot } from '../../workspace-resolver';
 import { initLogger, Logger } from '@finos/calm-shared/src/logger';
@@ -396,9 +397,10 @@ export function setupWorkspaceCommands(program: Command) {
         .command('bump')
         .description('Bump the version of any tracked document changed on disk relative to CalmHub, and update all references to point at the new version.')
         .option('--calm-hub-url <url>', 'CalmHub base URL (overrides ~/.calm.json)')
-        .option('--major', 'Apply a major version bump')
-        .option('--patch', 'Apply a patch version bump')
-        .action(async (options: { calmHubUrl?: string; major?: boolean; patch?: boolean }) => {
+        .option('--major', 'Apply a major version bump to all changed documents (no prompts)')
+        .option('--patch', 'Apply a patch version bump to all changed documents (no prompts)')
+        .option('--inherit-change-type', 'Auto-inherit the bump type for cascade-bumped dependents without prompting')
+        .action(async (options: { calmHubUrl?: string; major?: boolean; patch?: boolean; inheritChangeType?: boolean }) => {
             try {
                 const bundlePath = findWorkspaceManifestPath(process.cwd());
                 if (!bundlePath) {
@@ -415,24 +417,90 @@ export function setupWorkspaceCommands(program: Command) {
 
                 const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
-                const flagIncrement: ResourceChangeType | undefined =
-                    options.major ? 'MAJOR' : options.patch ? 'PATCH' : undefined;
-                const increment: ResourceChangeType = flagIncrement ?? workspaceConfig?.bump.defaultIncrement ?? 'MINOR';
+                const defaultIncrement: ResourceChangeType =
+                    options.major ? 'MAJOR' : options.patch ? 'PATCH' : workspaceConfig?.bump.defaultIncrement ?? 'MINOR';
 
                 const client = new CalmHubClient({ calmHubUrl });
-                const result = await bumpWorkspace(bundlePath, client, { increment });
 
-                if (result.bumped.length === 0) {
+                // Detect changed resources up-front so interactive prompts can be shown before
+                // any files are written, and to avoid a redundant detection pass inside bumpWorkspace.
+                const changedResources = await detectChangedResources(bundlePath, client);
+
+                if (changedResources.length === 0) {
                     logger.info('No documents needed bumping.');
-                } else {
-                    logger.info(`Bumped ${result.bumped.length} document(s):`);
-                    for (const b of result.bumped) {
-                        const suffix = b.triggeredBy ? ` (depends on ${b.triggeredBy})` : '';
-                        logger.info(`  ${b.id}: ${b.fromVersion} -> ${b.toVersion}${suffix}`);
+                    return;
+                }
+
+                // When --major or --patch is given, skip all prompts and apply a fixed increment.
+                const interactive = !options.major && !options.patch;
+
+                // Build a per-document increment map for directly-changed docs.
+                let perDocIncrements: Map<string, ResourceChangeType> | undefined;
+                if (interactive) {
+                    perDocIncrements = new Map();
+                    for (const resource of changedResources) {
+                        const chosen = await select<ResourceChangeType>({
+                            message: `Bump type for '${resource.id}' (currently ${resource.currentVersion}):`,
+                            choices: (['MINOR', 'MAJOR', 'PATCH'] as ResourceChangeType[]).map(v => ({
+                                name: v === defaultIncrement ? `${v.toLowerCase()} (default)` : v.toLowerCase(),
+                                value: v,
+                            })),
+                            default: defaultIncrement,
+                        });
+                        perDocIncrements.set(resource.id, chosen);
                     }
-                    const refChanges = result.refUpdates.reduce((sum, r) => sum + r.changeCount, 0);
-                    if (refChanges > 0) {
-                        logger.info(`Updated ${refChanges} reference(s) across the workspace to match.`);
+                }
+
+                // Cascade-bumped docs also get a prompt (default = trigger's increment) unless
+                // --inherit-change-type is set, in which case they silently auto-inherit.
+                const getCascadeIncrement = interactive && !options.inheritChangeType
+                    ? async (docId: string, triggeredBy: string, cascadeDefault: ResourceChangeType): Promise<ResourceChangeType> => {
+                        return await select<ResourceChangeType>({
+                            message: `Bump type for '${docId}' (depends on ${triggeredBy}):`,
+                            choices: (['MINOR', 'MAJOR', 'PATCH'] as ResourceChangeType[]).map(v => ({
+                                name: v === cascadeDefault ? `${v.toLowerCase()} (inherited)` : v.toLowerCase(),
+                                value: v,
+                            })),
+                            default: cascadeDefault,
+                        });
+                    }
+                    : undefined;
+
+                const result = await bumpWorkspace(bundlePath, client, {
+                    increment: defaultIncrement,
+                    perDocIncrements,
+                    preDetectedChanges: changedResources,
+                    getCascadeIncrement,
+                });
+
+                logger.info(`Bumped ${result.bumped.length} document(s):`);
+                for (const b of result.bumped) {
+                    const parts: string[] = [];
+                    if (b.triggeredBy) parts.push(`depends on ${b.triggeredBy}`);
+                    if (b.increment) parts.push(b.increment.toLowerCase());
+                    const suffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+                    logger.info(`  ${b.id}: ${b.fromVersion} -> ${b.toVersion}${suffix}`);
+                }
+                const refChanges = result.refUpdates.reduce((sum, r) => sum + r.changeCount, 0);
+                if (refChanges > 0) {
+                    logger.info(`Updated ${refChanges} reference(s) across the workspace to match.`);
+                }
+
+                // Post-bump validation: silently validate all architectures and patterns, then
+                // print a summary so the user knows whether bumping caused any regressions.
+                const manifest = await loadManifest(bundlePath);
+                const validationResults = await runPostBumpValidation(bundlePath, manifest);
+                if (validationResults.length > 0) {
+                    const failures = validationResults.filter(r => !r.passed);
+                    if (failures.length === 0) {
+                        logger.info(`All ${validationResults.length} document(s) passed validation.`);
+                    } else {
+                        logger.warn(`${failures.length} document(s) failed validation after bump:`);
+                        for (const r of failures) {
+                            const flag = r.type === 'architecture' ? '-a' : '-p';
+                            const detail = r.errorCount >= 0 ? ` (${r.errorCount} error(s))` : ' (could not validate)';
+                            logger.warn(`  ${r.id}${detail} — run \`calm validate ${flag} ${r.filePath}\` to see full output`);
+                        }
                     }
                 }
             } catch (err) {
