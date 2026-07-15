@@ -272,6 +272,34 @@ describe('Pattern Options', () => {
             expect(selectChoices(pattern, choices)).toEqual(expectedPattern);
         });
 
+        it('should not mutate the input pattern', () => {
+            const applicationA = buildNode('application-a');
+            const applicationB = buildNode('application-b');
+            const connectsRelationshipA = buildConnectsRelationship('application-a-to-c', 'app a to app c', 'application-a', 'application-c');
+            const connectsRelationshipB = buildConnectsRelationship('application-b-to-c', 'app b to app c', 'application-b', 'application-c');
+
+            const pattern = buildPattern(
+                [
+                    { 'anyOf': [ applicationA, applicationB ] }
+                ],
+                [
+                    buildPatternOptionRelationship(
+                        'option-id',
+                        'The choice of nodes and relationships in the pattern',
+                        buildPatternOption('anyOf', buildPatternChoice(applicationAtoC), buildPatternChoice(applicationBtoC))
+                    ),
+                    {
+                        'anyOf': [ connectsRelationshipA, connectsRelationshipB ]
+                    }
+                ]
+            );
+            const patternBeforeSelection = structuredClone(pattern);
+
+            selectChoices(pattern, [applicationAtoC]);
+
+            expect(pattern).toEqual(patternBeforeSelection);
+        });
+
         it('should not affect a normal pattern', () => {
             const applicationA = buildNode('application-a');
             const applicationB = buildNode('application-b');
