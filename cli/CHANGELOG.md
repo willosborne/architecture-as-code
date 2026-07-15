@@ -5,6 +5,32 @@ All notable changes to the CALM CLI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.0] - 2026-07-15
+
+## [1.49.0](https://github.com/finos/architecture-as-code/compare/cli-v1.48.0...cli-v1.49.0) (2026-07-15)
+
+* Add MAINTAINERS.md file (#2517) ([](https://github.com/finos/architecture-as-code/commit/90365f7f1071bde2b672b2c0c5626b68565c637d)), closes [#2517](https://github.com/finos/architecture-as-code/issues/2517)
+* Add security policy and reporting guidelines (#2807) ([](https://github.com/finos/architecture-as-code/commit/f61ca3060371fb9deb7e134cfb53a591811cb58b)), closes [#2807](https://github.com/finos/architecture-as-code/issues/2807)
+* CALMHub/CLI smoke tests (#2785) ([](https://github.com/finos/architecture-as-code/commit/696cd03225797fd7f407f7f0b8e3b1324b704a4d)), closes [#2785](https://github.com/finos/architecture-as-code/issues/2785)
+
+### ci
+
+* **calm-server:** release version 0.3.1 ([](https://github.com/finos/architecture-as-code/commit/975a743a7f2b051bae94181e0aa0d70598f6a02f))
+* **calm-server:** release version 0.3.1 ([](https://github.com/finos/architecture-as-code/commit/8f252ddee4e11067261afee9730650d34233bd44))
+
+### docs
+
+* **calm-ai:** document calm docify --export-diagrams in CLI instructions ([](https://github.com/finos/architecture-as-code/commit/daa2dbd6a0ec30cfe374f96134be7188aebb8b32))
+* **calm-ai:** document calm docify --export-diagrams in CLI instructions ([](https://github.com/finos/architecture-as-code/commit/8ec362378e16d8b092ee0cd9c047520209b99b6e))
+
+### feat
+
+* **calm-hub-ui:** revamped browse screen (#2804) ([](https://github.com/finos/architecture-as-code/commit/d71214e444ac5e3be851e91c09ff3904d2094a28)), closes [#2804](https://github.com/finos/architecture-as-code/issues/2804)
+
+### fix
+
+* **calm-hub:** add reflection annotation to search DTOs for native build (#2812) ([](https://github.com/finos/architecture-as-code/commit/2fe2f60c9718f3912a1298de0758f8175472133e)), closes [#2812](https://github.com/finos/architecture-as-code/issues/2812)
+
 ## [1.48.0] - 2026-07-13
 
 ## [1.48.0](https://github.com/finos/architecture-as-code/compare/cli-v1.47.1...cli-v1.48.0) (2026-07-13)
