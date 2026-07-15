@@ -11,11 +11,14 @@ import { CalmReferenceResolver } from './calm-reference-resolver.js';
  *    (e.g. "validate each detailed-architecture once") and detect cycles without their own set.
  *
  * A reference is marked as *seen* before the underlying load is awaited, so a failed load still
- * counts as seen (a sibling referencing the same failing URL is not retried) — matching the
- * historical `visitedUrls` semantics. Only successful loads populate the value cache.
+ * counts as seen (a sibling referencing the same failing URL is not retried) matching the
+ * historical `visitedUrls` semantics. Successful loads populate the value cache; failed loads cache
+ * the rejection instead, so a repeat {@link resolve} for a known-bad reference re-throws the cached
+ * error without re-hitting the delegate. Callers can tell the two apart via {@link hasFailed}.
  */
 export class CachingTrackingResolver implements CalmReferenceResolver {
     private readonly cache = new Map<string, unknown>();
+    private readonly failures = new Map<string, unknown>();
     private readonly seen = new Set<string>();
 
     constructor(private readonly delegate: CalmReferenceResolver) {}
@@ -28,6 +31,11 @@ export class CachingTrackingResolver implements CalmReferenceResolver {
     /** Whether the reference has been resolved or attempted (used for dedupe / cycle checks). */
     has(reference: string): boolean {
         return this.seen.has(reference);
+    }
+
+    /** Whether a previous {@link resolve} for this reference failed to load. */
+    hasFailed(reference: string): boolean {
+        return this.failures.has(reference);
     }
 
     /** The cached raw document for a reference, or undefined if never successfully loaded. */
@@ -50,9 +58,17 @@ export class CachingTrackingResolver implements CalmReferenceResolver {
         if (this.cache.has(reference)) {
             return this.cache.get(reference);
         }
+        if (this.failures.has(reference)) {
+            throw this.failures.get(reference);
+        }
         this.seen.add(reference);
-        const document = await this.delegate.resolve(reference);
-        this.cache.set(reference, document);
-        return document;
+        try {
+            const document = await this.delegate.resolve(reference);
+            this.cache.set(reference, document);
+            return document;
+        } catch (err) {
+            this.failures.set(reference, err);
+            throw err;
+        }
     }
 }

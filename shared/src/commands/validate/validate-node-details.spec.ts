@@ -254,10 +254,10 @@ describe('validateNodeDetails', () => {
         expect(result.jsonSchemaOutputs[1].path).toBe('/nodes/1/details/detailed-architecture/y');
     });
 
-    // Reproduces rocketstack-matt's review comment on PR #2805:
+    // Covers rocketstack-matt's review comment on PR #2805:
     // https://github.com/finos/architecture-as-code/pull/2805#discussion_r3576885169
-    // Asserts the DESIRED behaviour (both nodes report); expected to FAIL against current code,
-    // which returns only one error. Left red pending clarification before fixing.
+    // A failed reference is re-reported at every node that references it, rather than being skipped
+    // as a cycle after the first occurrence.
     it('reports a load error for every node sharing the same broken detailed-architecture reference', async () => {
         const brokenUrl = 'https://example.com/missing-shared.json';
         const arch = {

@@ -89,8 +89,13 @@ async function validateNodeDetail(
 
     if (!detailedArchitecture || !archUrl) return emptyNodeResult();
 
-    if (references.has(archUrl)) {
-        logger.debug(`Cycle detected: skipping already-visited architecture '${archUrl}'`);
+    // A reference already resolved (or currently being resolved higher up the traversal) is skipped:
+    // this both dedupes "validate each detailed-architecture once" and keeps cyclic references safe.
+    // A reference whose previous load FAILED is deliberately not skipped, so the load error is
+    // re-reported at every node that references it (the resolver returns the cached failure, so the
+    // delegate is not re-fetched).
+    if (references.has(archUrl) && !references.hasFailed(archUrl)) {
+        logger.debug(`Skipping already-resolved architecture '${archUrl}'`);
         return emptyNodeResult();
     }
 
