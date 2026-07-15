@@ -545,6 +545,38 @@ describe('setupWorkspaceCommands', () => {
             await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
+
+        it('runs post-bump validation and reports all passed when workspace is up to date', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce([]);
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: true, errorCount: 0 },
+            ] as never);
+            await program.parseAsync(['node', 'test', 'workspace', 'check']);
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('reports validation failures but exits due to bump requirement, not validation', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/x', metadata: {}, currentVersion: '1.0.0', latestHubVersion: '1.0.0' },
+            ] as never);
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'architecture', passed: false, errorCount: 2 },
+            ] as never);
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('reports validation failure with "(could not validate)" when errorCount is -1', async () => {
+            mocks.detectChangedResources.mockResolvedValueOnce([]);
+            mocks.runPostBumpValidation.mockResolvedValueOnce([
+                { id: 'doc-a', filePath: '/a.json', type: 'pattern', passed: false, errorCount: -1 },
+            ] as never);
+            await program.parseAsync(['node', 'test', 'workspace', 'check']);
+            expect(mocks.runPostBumpValidation).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
     });
 
     describe('workspace bump', () => {

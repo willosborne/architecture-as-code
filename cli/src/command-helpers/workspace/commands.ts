@@ -377,16 +377,36 @@ export function setupWorkspaceCommands(program: Command) {
                 const client = new CalmHubClient({ calmHubUrl });
                 const changed = await detectChangedResources(bundlePath, client);
 
+                let needsBump = false;
                 if (changed.length === 0) {
                     logger.info('Workspace is up to date - no documents need bumping.');
-                    return;
+                } else {
+                    needsBump = true;
+                    logger.error(`${changed.length} document(s) changed on disk but not bumped:`);
+                    for (const c of changed) {
+                        logger.error(`  ${c.id} (current version ${c.currentVersion}). Run \`calm workspace bump\`.`);
+                    }
                 }
 
-                logger.error(`${changed.length} document(s) changed on disk but not bumped:`);
-                for (const c of changed) {
-                    logger.error(`  ${c.id} (current version ${c.currentVersion}). Run \`calm workspace bump\`.`);
+                const manifest = await loadManifest(bundlePath);
+                const validationResults = await runPostBumpValidation(bundlePath, manifest);
+                if (validationResults.length > 0) {
+                    const failures = validationResults.filter(r => !r.passed);
+                    if (failures.length === 0) {
+                        logger.info(`All ${validationResults.length} document(s) passed validation.`);
+                    } else {
+                        logger.warn(`${failures.length} document(s) failed validation:`);
+                        for (const r of failures) {
+                            const flag = r.type === 'architecture' ? '-a' : '-p';
+                            const detail = r.errorCount >= 0 ? ` (${r.errorCount} error(s))` : ' (could not validate)';
+                            logger.warn(`  ${r.id}${detail} — run \`calm validate ${flag} ${r.filePath}\` to see full output`);
+                        }
+                    }
                 }
-                process.exit(1);
+
+                if (needsBump) {
+                    process.exit(1);
+                }
             } catch (err) {
                 logger.error('Failed to check workspace: ' + (err instanceof Error ? err.message : String(err)));
                 process.exit(1);
