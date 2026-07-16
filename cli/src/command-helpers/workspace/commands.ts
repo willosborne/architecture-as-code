@@ -420,9 +420,10 @@ export function setupWorkspaceCommands(program: Command) {
         .description('Bump the version of any tracked document changed on disk relative to CalmHub, and update all references to point at the new version.')
         .option('--calm-hub-url <url>', 'CalmHub base URL (overrides ~/.calm.json)')
         .option('--major', 'Apply a major version bump to all changed documents (no prompts)')
+        .option('--minor', 'Apply a minor version bump to all changed documents (no prompts)')
         .option('--patch', 'Apply a patch version bump to all changed documents (no prompts)')
         .option('--inherit-change-type', 'Auto-inherit the bump type for cascade-bumped dependents without prompting')
-        .action(async (options: { calmHubUrl?: string; major?: boolean; patch?: boolean; inheritChangeType?: boolean }) => {
+        .action(async (options: { calmHubUrl?: string; major?: boolean; minor?: boolean; patch?: boolean; inheritChangeType?: boolean }) => {
             try {
                 const bundlePath = findWorkspaceManifestPath(process.cwd());
                 if (!bundlePath) {
@@ -430,8 +431,8 @@ export function setupWorkspaceCommands(program: Command) {
                     process.exit(1);
                 }
 
-                if (options.major && options.patch) {
-                    logger.error('Cannot use --major and --patch together.');
+                if ([options.major, options.minor, options.patch].filter(Boolean).length > 1) {
+                    logger.error('Cannot use --major, --minor and --patch together.');
                     process.exit(1);
                 }
 
@@ -440,7 +441,7 @@ export function setupWorkspaceCommands(program: Command) {
                 const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
                 const defaultIncrement: ResourceChangeType =
-                    options.major ? 'MAJOR' : options.patch ? 'PATCH' : workspaceConfig?.bump.defaultIncrement ?? 'MINOR';
+                    options.major ? 'MAJOR' : options.minor ? 'MINOR' : options.patch ? 'PATCH' : workspaceConfig?.bump.defaultIncrement ?? 'MINOR';
 
                 const client = new CalmHubClient({ calmHubUrl });
 
@@ -453,8 +454,8 @@ export function setupWorkspaceCommands(program: Command) {
                     return;
                 }
 
-                // When --major or --patch is given, skip all prompts and apply a fixed increment.
-                const interactive = !options.major && !options.patch;
+                // When --major, --minor or --patch is given, skip all prompts and apply a fixed increment.
+                const interactive = !options.major && !options.minor && !options.patch;
 
                 // Build a per-document increment map for directly-changed docs.
                 let perDocIncrements: Map<string, ResourceChangeType> | undefined;

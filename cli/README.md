@@ -913,17 +913,18 @@ The command exits non-zero if any documents need bumping **or** if any document 
 Bump the version of every document that has changed on disk relative to CalmHub, and update every reference to those documents across the workspace so everything stays in sync.
 
 ```
-calm workspace bump [--calm-hub-url <url>] [--major | --patch] [--inherit-change-type]
+calm workspace bump [--calm-hub-url <url>] [--major | --minor | --patch] [--inherit-change-type]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to `calmHubUrl` in `~/.calm.json`. |
 | `--major` | Apply a major bump to all changed documents without prompting (e.g. `1.2.3` → `2.0.0`). |
+| `--minor` | Apply a minor bump to all changed documents without prompting (e.g. `1.2.3` → `1.3.0`). |
 | `--patch` | Apply a patch bump to all changed documents without prompting (e.g. `1.2.3` → `1.2.4`). |
 | `--inherit-change-type` | Suppress prompts for cascade-bumped dependents; they silently inherit the trigger's bump type. |
 
-When neither `--major` nor `--patch` is given, `bump` prompts interactively for each changed document:
+When none of `--major`, `--minor`, or `--patch` is given, `bump` prompts interactively for each changed document:
 
 ```
 ? Bump type for 'my-pattern' (currently 1.0.0): › minor (default)

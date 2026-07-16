@@ -137,6 +137,35 @@ describe('bump', () => {
             expect((await read('a.json')).$id).toBe(idAt('a', '1.1.0'));
         });
 
+        it('does not inject an empty description into a document that never had one', async () => {
+            // updateDocumentMetadata (used by hub push to normalise against CalmHub's stored
+            // form) defaults a missing description to ''. Workspace documents are pushed raw and
+            // validated locally, so that default would fail the "no empty string properties" rule.
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
+            await saveManifest(bundlePath, { 'a': { path: 'files/a.json', type: 'architecture' } });
+            const client = makeClient({
+                versions: { a: ['1.0.0'] },
+                remote: { 'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A' } },
+            });
+
+            await bumpWorkspace(bundlePath, client, { increment: 'MINOR' });
+
+            expect(await read('a.json')).not.toHaveProperty('description');
+        });
+
+        it('preserves an existing description when bumping', async () => {
+            await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', description: 'existing', extra: 'edited' });
+            await saveManifest(bundlePath, { 'a': { path: 'files/a.json', type: 'architecture' } });
+            const client = makeClient({
+                versions: { a: ['1.0.0'] },
+                remote: { 'a@1.0.0': { $id: idAt('a', '1.0.0'), title: 'A', description: 'existing' } },
+            });
+
+            await bumpWorkspace(bundlePath, client, { increment: 'MINOR' });
+
+            expect((await read('a.json')).description).toBe('existing');
+        });
+
         it('honours --major / --patch via the increment option', async () => {
             await write('a.json', { $id: idAt('a', '1.0.0'), title: 'A', extra: 'edited' });
             await saveManifest(bundlePath, { 'a': { path: 'files/a.json', type: 'architecture' } });

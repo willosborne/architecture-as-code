@@ -17,6 +17,22 @@ export { canonicalEqual };
 
 const logger: Logger = initLogger(false, 'workspace');
 
+/**
+ * Rewrites `$id`/`title` for a version bump without the empty-description default that
+ * `updateDocumentMetadata` applies for CalmHub push normalisation (see hub-commands.ts, where it
+ * mirrors how CalmHub stores a description-less document). Workspace documents are pushed raw
+ * (see push.ts) and validated locally, so injecting `description: ''` into a document that never
+ * had one would fail the `architecture-has-no-empty-string-properties` spectral rule.
+ */
+function bumpDocumentContent(raw: string, metadata: DocumentMetadata): string {
+    const hadDescription = Object.prototype.hasOwnProperty.call(JSON.parse(raw), 'description');
+    const updated = updateDocumentMetadata(raw, metadata);
+    if (hadDescription) return updated;
+    const updatedJson = JSON.parse(updated);
+    delete updatedJson.description;
+    return JSON.stringify(updatedJson, null, 2);
+}
+
 export interface ChangedResource {
     id: string;
     filePath: string;
@@ -152,7 +168,7 @@ export async function bumpWorkspace(
         const docIncrement = options.perDocIncrements?.get(c.id) ?? options.increment;
         const toVersion = computeSemVerBump(c.latestHubVersion, docIncrement);
         const raw = await readFile(c.filePath, 'utf8');
-        const updated = updateDocumentMetadata(raw, { ...c.metadata, version: toVersion });
+        const updated = bumpDocumentContent(raw, { ...c.metadata, version: toVersion });
         await writeFile(c.filePath, updated, 'utf8');
         bumped.push({ id: c.id, filePath: c.filePath, fromVersion: c.currentVersion, toVersion, increment: docIncrement });
         appliedIncrements.set(c.id, docIncrement);
@@ -211,7 +227,7 @@ export async function bumpWorkspace(
                 : cascadeDefault;
 
             const toVersion = computeSemVerBump(metadata.version, cascadeIncrement);
-            const updated = updateDocumentMetadata(raw, { ...metadata, version: toVersion });
+            const updated = bumpDocumentContent(raw, { ...metadata, version: toVersion });
             await writeFile(filePath, updated, 'utf8');
             bumped.push({ id: candidate.docId, filePath, fromVersion: metadata.version, toVersion, triggeredBy: triggerLabel, increment: cascadeIncrement });
             appliedIncrements.set(candidate.docId, cascadeIncrement);
