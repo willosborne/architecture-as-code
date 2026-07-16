@@ -42,6 +42,18 @@ class CalmArchitectureQueryTest {
     }
 
     @Test
+    void findRelationshipById_returnsRelationship() {
+        assertThat(arch.findRelationshipById("rel-connects")).isPresent();
+        assertThat(arch.findRelationshipById("rel-connects").get().description().get())
+                .isEqualTo("Service writes to DB");
+    }
+
+    @Test
+    void findRelationshipById_returnsEmptyWhenMissing() {
+        assertThat(arch.findRelationshipById("no-such-relationship")).isEmpty();
+    }
+
+    @Test
     void getRelationships_nodeId_returnsAllRelationshipsInvolvingNode() {
         // payment-service appears in rel-connects (source), rel-interacts (node), rel-deployed-in (node)
         List<CalmRelationship> rels = arch.getRelationships("payment-service");

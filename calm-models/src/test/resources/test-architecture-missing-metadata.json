@@ -1,6 +1,4 @@
 {
-  "$schema": "https://calm.finos.org/calm/namespaces/finos/patterns/test-pattern/versions/1.0.0",
-  "$id": "https://calm.finos.org/calm/namespaces/finos/architectures/test/versions/1.0.0",
   "nodes": [
     {
       "unique-id": "payment-service",
