@@ -156,7 +156,7 @@ export function selectChoices(inputPattern: object, choices: CalmChoice[], debug
     const logger = initLogger(debug, 'calm-generate-options');
     logger.debug(`Selecting these choices from the pattern [${JSON.stringify(choices)}]`);
 
-    const pattern = {...inputPattern} as SchemaNode; // make a copy so we don't mutate the input pattern
+    const pattern = structuredClone(inputPattern) as SchemaNode; // deep copy so we don't mutate the input pattern, which may be cached and reused by callers
     const nodeIds: string[] = choices.flatMap(choice => choice.nodes);
     const relationshipIds: string[] = choices.flatMap(choice => choice.relationships);
 

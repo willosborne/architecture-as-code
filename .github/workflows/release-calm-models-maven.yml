@@ -1,0 +1,52 @@
+name: "Release and publish CALM models to Maven Central"
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+            - 'release/calm-models-*'
+            
+permissions:
+    contents: write
+
+jobs:
+    publish-central:
+        name: Publish CALM models to Maven Central
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                token: ${{ secrets.GITHUB_TOKEN }}
+                persist-credentials: true
+                fetch-depth: 0
+            - name: Setup JDK 21 and auto-generate Sonatype settings
+              uses: actions/setup-java@v4
+              with:
+                distribution: 'temurin'
+                java-version: '21'
+                server-id: central
+                server-username: CI_DEPLOY_USERNAME
+                server-password: CI_DEPLOY_PASSWORD
+                gpg-private-key: ${{ secrets.CI_GPG_PRIVATE_KEY }}
+                gpg-passphrase: CI_GPG_PASSPHRASE
+
+            - name: Establish Git Deployment Author Info
+              run: |
+                git config --global user.name "github-actions[bot]"
+                git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+            - name: Execute release lifecycle (Isolating calm-models module)
+              run: |
+                ./mvnw -B release:prepare release:perform \
+                  -pl :calm-models -am \
+                  -DpreparationGoals=clean \
+                  -DreleaseProfiles=release \
+                  -Darguments="-Prelease -DskipTests -pl :calm-models" \
+                  -DignoreSnapshots=true \
+                  -DinteractiveMode=false
+              env:
+                CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
+                CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
+                CI_GPG_PASSPHRASE: ${{ secrets.CI_GPG_PASSPHRASE }}

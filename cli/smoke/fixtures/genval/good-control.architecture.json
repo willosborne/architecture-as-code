@@ -1,0 +1,27 @@
+{
+  "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+  "unique-id": "smoke-online-good-control",
+  "nodes": [
+    {
+      "unique-id": "svc",
+      "node-type": "service",
+      "name": "Service",
+      "description": "A service whose security control config satisfies its CalmHub-hosted requirement",
+      "controls": {
+        "security": {
+          "description": "Security controls for the service",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/configurations/good/versions/1.0.0"
+            }
+          ]
+        }
+      },
+      "details": {
+        "detailed-architecture": "http://localhost:8080/calm/namespaces/smoke-genval/architectures/service-detail/versions/1.0.0"
+      }
+    }
+  ],
+  "relationships": []
+}

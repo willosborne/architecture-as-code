@@ -1,0 +1,7 @@
+{
+  "$schema": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/requirement/versions/1.0.0",
+  "$id": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/configurations/bad/versions/1.0.0",
+  "control-id": "security-999",
+  "name": "Smoke Online Security Control",
+  "description": "A deliberately mismatched control config whose control-id breaks the hub-hosted requirement const"
+}
