@@ -31,7 +31,7 @@
 
     <scm>
         <connection>scm:git:https://github.com/finos/architecture-as-code.git</connection>
-        <developerConnection>scm:git:ssh://github.com/finos/architecture-as-code.git</developerConnection>
+        <developerConnection>scm:git:https://github.com/finos/architecture-as-code.git</developerConnection>
         <url>https://github.com/finos/architecture-as-code/tree/main</url>
     </scm>
 
