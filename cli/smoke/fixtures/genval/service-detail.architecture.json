@@ -1,0 +1,16 @@
+{
+  "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+  "$id": "http://localhost:8080/calm/namespaces/smoke-genval/architectures/service-detail/versions/1.0.0",
+  "title": "Smoke service detailed architecture",
+  "description": "The detailed architecture referenced from the service node's node-details",
+  "unique-id": "smoke-service-detail",
+  "nodes": [
+    {
+      "unique-id": "db",
+      "node-type": "database",
+      "name": "Database",
+      "description": "A leaf node inside the service's detailed architecture"
+    }
+  ],
+  "relationships": []
+}

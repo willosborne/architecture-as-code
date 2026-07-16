@@ -1,0 +1,24 @@
+{
+  "$schema": "https://calm.finos.org/release/1.2/meta/calm.json",
+  "unique-id": "smoke-online-bad-control",
+  "nodes": [
+    {
+      "unique-id": "svc",
+      "node-type": "service",
+      "name": "Service",
+      "description": "A service whose security control config breaks its CalmHub-hosted requirement",
+      "controls": {
+        "security": {
+          "description": "Security controls for the service",
+          "requirements": [
+            {
+              "requirement-url": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/requirement/versions/1.0.0",
+              "config-url": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/configurations/bad/versions/1.0.0"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "relationships": []
+}

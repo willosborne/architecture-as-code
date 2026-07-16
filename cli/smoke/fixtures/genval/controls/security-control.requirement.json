@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "http://localhost:8080/calm/domains/smoke-online/controls/security-control/requirement/versions/1.0.0",
+  "title": "Smoke online security control requirement",
+  "type": "object",
+  "properties": {
+    "control-id": {
+      "const": "security-100"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "control-id",
+    "name",
+    "description"
+  ]
+}
