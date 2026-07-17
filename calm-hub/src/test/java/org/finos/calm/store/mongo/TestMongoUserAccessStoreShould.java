@@ -197,6 +197,27 @@ public class TestMongoUserAccessStoreShould {
     }
 
     @Test
+    void rethrow_original_error_when_existing_namespace_grant_lookup_finds_nothing() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(101);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()));
+
+        DocumentFindIterable findIterable = mock(DocumentFindIterable.class);
+        when(userAccessCollection.find(ArgumentMatchers.any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setNamespace("finos")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoUserAccessStore.createUserAccessForNamespace(userAccess));
+    }
+
+    @Test
     void propagate_non_duplicate_key_errors_when_creating_namespace_user_access() {
         when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
         when(counterStore.getNextUserAccessSequenceValue()).thenReturn(101);
@@ -323,6 +344,26 @@ public class TestMongoUserAccessStoreShould {
         UserAccess actual = mongoUserAccessStore.createUserAccessForDomain(userAccess);
 
         assertThat(actual.getUserAccessId(), is(77));
+    }
+
+    @Test
+    void rethrow_original_error_when_existing_domain_grant_lookup_finds_nothing() {
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(201);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()));
+
+        DocumentFindIterable findIterable = mock(DocumentFindIterable.class);
+        when(userAccessCollection.find(ArgumentMatchers.any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(null);
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setDomain("payments")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoUserAccessStore.createUserAccessForDomain(userAccess));
     }
 
     @Test

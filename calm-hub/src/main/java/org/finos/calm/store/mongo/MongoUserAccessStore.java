@@ -48,45 +48,26 @@ public class MongoUserAccessStore implements UserAccessStore {
             throw new NamespaceNotFoundException();
         }
 
-        int userAccessId = counterStore.getNextUserAccessSequenceValue();
-        Document userAccessDoc = new Document("username", userAccess.getUsername())
-                .append("permission", userAccess.getPermission().name())
-                .append("namespace", userAccess.getNamespace())
-                .append("createdAt", userAccess.getCreationDateTime())
-                .append("lastUpdated", userAccess.getUpdateDateTime())
-                .append("userAccessId", userAccessId);
-
-        try {
-            userAccessCollection.insertOne(userAccessDoc);
-        } catch (MongoWriteException e) {
-            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
-                throw e;
-            }
-            // A concurrent request already granted this exact (username, namespace, permission)
-            // triple; the grant is additive/idempotent, so return the existing record.
-            log.info("Grant already exists for namespace: {}, permission: {}, username: {}",
-                    userAccess.getNamespace(), userAccess.getPermission(), userAccess.getUsername());
-            return buildFromDocument(findExistingGrant(
-                    Filters.eq("namespace", userAccess.getNamespace()), userAccess));
-        }
-        log.info("UserAccess has been created for namespace: {}, permission: {}, username: {}",
-                userAccess.getNamespace(), userAccess.getPermission(), userAccess.getUsername());
-
-        return new UserAccess.UserAccessBuilder()
-                .setUserAccessId(userAccessId)
-                .setNamespace(userAccess.getNamespace())
-                .setPermission(userAccess.getPermission())
-                .setUsername(userAccess.getUsername())
-                .build();
+        return createUserAccess(userAccess, "namespace", userAccess.getNamespace());
     }
 
     @Override
     public UserAccess createUserAccessForDomain(UserAccess userAccess) {
         log.info("User-access details: {}", userAccess);
+        return createUserAccess(userAccess, "domain", userAccess.getDomain());
+    }
+
+    /**
+     * Creates a grant scoped by either {@code namespace} or {@code domain} (whichever
+     * {@code scopeField} names). On a concurrent duplicate-key race, returns the winner's
+     * grant instead of throwing — the grant is additive/idempotent, so this keeps create
+     * idempotent under multi-instance concurrency.
+     */
+    private UserAccess createUserAccess(UserAccess userAccess, String scopeField, String scopeValue) {
         int userAccessId = counterStore.getNextUserAccessSequenceValue();
         Document userAccessDoc = new Document("username", userAccess.getUsername())
                 .append("permission", userAccess.getPermission().name())
-                .append("domain", userAccess.getDomain())
+                .append(scopeField, scopeValue)
                 .append("createdAt", userAccess.getCreationDateTime())
                 .append("lastUpdated", userAccess.getUpdateDateTime())
                 .append("userAccessId", userAccessId);
@@ -97,22 +78,20 @@ public class MongoUserAccessStore implements UserAccessStore {
             if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
                 throw e;
             }
-            // A concurrent request already granted this exact (username, domain, permission)
-            // triple; the grant is additive/idempotent, so return the existing record.
-            log.info("Grant already exists for domain: {}, permission: {}, username: {}",
-                    userAccess.getDomain(), userAccess.getPermission(), userAccess.getUsername());
-            return buildFromDocument(findExistingGrant(
-                    Filters.eq("domain", userAccess.getDomain()), userAccess));
+            log.info("Grant already exists for {}: {}, permission: {}, username: {}",
+                    scopeField, scopeValue, userAccess.getPermission(), userAccess.getUsername());
+            Document existingGrant = findExistingGrant(Filters.eq(scopeField, scopeValue), userAccess);
+            if (existingGrant == null) {
+                // The racing writer's document is gone by the time we looked it up (e.g. revoked
+                // concurrently) — nothing to return, so surface the original write failure.
+                throw e;
+            }
+            return buildFromDocument(existingGrant);
         }
-        log.info("UserAccess has been created for domain: {}, permission: {}, username: {}",
-                userAccess.getDomain(), userAccess.getPermission(), userAccess.getUsername());
+        log.info("UserAccess has been created for {}: {}, permission: {}, username: {}",
+                scopeField, scopeValue, userAccess.getPermission(), userAccess.getUsername());
 
-        return new UserAccess.UserAccessBuilder()
-                .setUserAccessId(userAccessId)
-                .setDomain(userAccess.getDomain())
-                .setPermission(userAccess.getPermission())
-                .setUsername(userAccess.getUsername())
-                .build();
+        return buildFromDocument(userAccessDoc);
     }
 
     @Override
