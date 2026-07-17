@@ -34,6 +34,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -208,6 +209,32 @@ public class TestMongoInterfaceStoreShould {
                 eq(Filters.eq("namespace", validNamespace)),
                 eq(Updates.push("interfaces", expectedDoc)),
                 any(UpdateOptions.class));
+    }
+
+    @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextInterfaceSequenceValue()).thenReturn(42);
+        when(interfaceCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+        CreateInterfaceRequest interfaceToCreate = new CreateInterfaceRequest("test", "Test Interface", "{}");
+
+        mongoInterfaceStore.createInterfaceForNamespace(interfaceToCreate, "finos");
+
+        verify(interfaceCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_an_interface() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextInterfaceSequenceValue()).thenReturn(42);
+        when(interfaceCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+        CreateInterfaceRequest interfaceToCreate = new CreateInterfaceRequest("test", "Test Interface", "{}");
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoInterfaceStore.createInterfaceForNamespace(interfaceToCreate, "finos"));
     }
 
     @Test

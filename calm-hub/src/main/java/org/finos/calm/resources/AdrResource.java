@@ -309,7 +309,8 @@ public class AdrResource {
                 AdrNotFoundException.class, ex -> handleAdrNotFoundException(adrId, ex),
                 AdrRevisionNotFoundException.class, ex -> handleAdrRevisionNotFoundException(adrId, revision, ex),
                 AdrParseException.class, this::handleAdrParseException,
-                AdrPersistenceException.class, ex -> handleAdrPersistenceException(adrId, ex)
+                AdrPersistenceException.class, ex -> handleAdrPersistenceException(adrId, ex),
+                AdrRevisionExistsException.class, ex -> handleAdrRevisionExistsException(adrId, ex)
         );
 
         return handlers.getOrDefault(e.getClass(), ex -> {
@@ -346,5 +347,10 @@ public class AdrResource {
     private Response handleAdrPersistenceException(int adrId, Exception ex) {
         logger.error("Could not persist update of ADR [{}]", adrId, ex);
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity("Could not persist update of ADR: [{}]:" + adrId).build();
+    }
+
+    private Response handleAdrRevisionExistsException(int adrId, Exception ex) {
+        logger.error("Concurrent update created a conflicting revision for ADR [{}]", adrId, ex);
+        return Response.status(Response.Status.CONFLICT).entity("ADR " + adrId + " was concurrently updated, please retry").build();
     }
 }

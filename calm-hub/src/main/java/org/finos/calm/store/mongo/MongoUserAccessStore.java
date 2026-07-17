@@ -1,5 +1,7 @@
 package org.finos.calm.store.mongo;
 
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -7,6 +9,7 @@ import com.mongodb.client.result.DeleteResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.finos.calm.domain.UserAccess;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.exception.UserAccessNotFoundException;
@@ -53,7 +56,19 @@ public class MongoUserAccessStore implements UserAccessStore {
                 .append("lastUpdated", userAccess.getUpdateDateTime())
                 .append("userAccessId", userAccessId);
 
-        userAccessCollection.insertOne(userAccessDoc);
+        try {
+            userAccessCollection.insertOne(userAccessDoc);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw e;
+            }
+            // A concurrent request already granted this exact (username, namespace, permission)
+            // triple; the grant is additive/idempotent, so return the existing record.
+            log.info("Grant already exists for namespace: {}, permission: {}, username: {}",
+                    userAccess.getNamespace(), userAccess.getPermission(), userAccess.getUsername());
+            return buildFromDocument(findExistingGrant(
+                    Filters.eq("namespace", userAccess.getNamespace()), userAccess));
+        }
         log.info("UserAccess has been created for namespace: {}, permission: {}, username: {}",
                 userAccess.getNamespace(), userAccess.getPermission(), userAccess.getUsername());
 
@@ -76,7 +91,19 @@ public class MongoUserAccessStore implements UserAccessStore {
                 .append("lastUpdated", userAccess.getUpdateDateTime())
                 .append("userAccessId", userAccessId);
 
-        userAccessCollection.insertOne(userAccessDoc);
+        try {
+            userAccessCollection.insertOne(userAccessDoc);
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw e;
+            }
+            // A concurrent request already granted this exact (username, domain, permission)
+            // triple; the grant is additive/idempotent, so return the existing record.
+            log.info("Grant already exists for domain: {}, permission: {}, username: {}",
+                    userAccess.getDomain(), userAccess.getPermission(), userAccess.getUsername());
+            return buildFromDocument(findExistingGrant(
+                    Filters.eq("domain", userAccess.getDomain()), userAccess));
+        }
         log.info("UserAccess has been created for domain: {}, permission: {}, username: {}",
                 userAccess.getDomain(), userAccess.getPermission(), userAccess.getUsername());
 
@@ -192,6 +219,14 @@ public class MongoUserAccessStore implements UserAccessStore {
         if (result.getDeletedCount() == 0) {
             throw new UserAccessNotFoundException();
         }
+    }
+
+    private Document findExistingGrant(Bson scopeFilter, UserAccess userAccess) {
+        return userAccessCollection.find(Filters.and(
+                Filters.eq("username", userAccess.getUsername()),
+                scopeFilter,
+                Filters.eq("permission", userAccess.getPermission().name())
+        )).first();
     }
 
     private UserAccess buildFromDocument(Document doc) {

@@ -1,5 +1,8 @@
 package org.finos.calm.store.mongo;
 
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -7,6 +10,7 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.finos.calm.domain.UserAccess;
 import org.finos.calm.domain.UserAccess.Permission;
@@ -167,6 +171,49 @@ public class TestMongoUserAccessStoreShould {
     }
 
     @Test
+    void return_existing_grant_when_a_concurrent_request_already_created_the_same_namespace_grant() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(101);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()));
+
+        Document existingDoc = new Document("username", "test")
+                .append("namespace", "finos")
+                .append("permission", Permission.write.name())
+                .append("userAccessId", 55);
+        DocumentFindIterable findIterable = mock(DocumentFindIterable.class);
+        when(userAccessCollection.find(ArgumentMatchers.any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(existingDoc);
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setNamespace("finos")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        UserAccess actual = mongoUserAccessStore.createUserAccessForNamespace(userAccess);
+
+        assertThat(actual.getUserAccessId(), is(55));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_namespace_user_access() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(101);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setNamespace("finos")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoUserAccessStore.createUserAccessForNamespace(userAccess));
+    }
+
+    @Test
     void return_user_access_list_for_namespace() throws Exception {
         String namespace = "finos";
         Document doc = new Document("username", "test")
@@ -251,6 +298,47 @@ public class TestMongoUserAccessStoreShould {
         assertThat(actual.getUserAccessId(), is(201));
         assertThat(actual.getDomain(), is("payments"));
         verify(userAccessCollection).insertOne(ArgumentMatchers.any(Document.class));
+    }
+
+    @Test
+    void return_existing_grant_when_a_concurrent_request_already_created_the_same_domain_grant() {
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(201);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()));
+
+        Document existingDoc = new Document("username", "test")
+                .append("domain", "payments")
+                .append("permission", Permission.write.name())
+                .append("userAccessId", 77);
+        DocumentFindIterable findIterable = mock(DocumentFindIterable.class);
+        when(userAccessCollection.find(ArgumentMatchers.any(Bson.class))).thenReturn(findIterable);
+        when(findIterable.first()).thenReturn(existingDoc);
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setDomain("payments")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        UserAccess actual = mongoUserAccessStore.createUserAccessForDomain(userAccess);
+
+        assertThat(actual.getUserAccessId(), is(77));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_domain_user_access() {
+        when(counterStore.getNextUserAccessSequenceValue()).thenReturn(201);
+        when(userAccessCollection.insertOne(ArgumentMatchers.any(Document.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+
+        UserAccess userAccess = new UserAccess.UserAccessBuilder()
+                .setDomain("payments")
+                .setUsername("test")
+                .setPermission(Permission.write)
+                .build();
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoUserAccessStore.createUserAccessForDomain(userAccess));
     }
 
     @Test

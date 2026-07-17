@@ -136,13 +136,14 @@ public class TestAdrResourceShould {
                 Arguments.of("valid", new AdrRevisionNotFoundException(), 404),
                 Arguments.of("valid", new AdrParseException(), 500),
                 Arguments.of("valid", new AdrPersistenceException(), 500),
+                Arguments.of("valid", new AdrRevisionExistsException(), 409),
                 Arguments.of("valid", null, 201)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideParametersForUpdateAdrTests")
-    void respond_correctly_to_update_adr(String namespace, Throwable exceptionToThrow, int expectedStatusCode) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
+    void respond_correctly_to_update_adr(String namespace, Throwable exceptionToThrow, int expectedStatusCode) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException, AdrRevisionExistsException {
         String adrJson = "{ \"title\": \"My ADR\" }";
         if (exceptionToThrow != null) {
             when(mockAdrStore.updateAdrForNamespace(any(AdrMeta.class))).thenThrow(exceptionToThrow);
@@ -325,13 +326,14 @@ public class TestAdrResourceShould {
                 Arguments.of("valid", new AdrRevisionNotFoundException(), 404),
                 Arguments.of("valid", new AdrParseException(), 500),
                 Arguments.of("valid", new AdrPersistenceException(), 500),
+                Arguments.of("valid", new AdrRevisionExistsException(), 409),
                 Arguments.of("valid", null, 201)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideParametersForUpdateAdrStatusTests")
-    void respond_correctly_on_update_adr_status(String namespace, Throwable exceptionToThrow, int expectedStatusCode) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
+    void respond_correctly_on_update_adr_status(String namespace, Throwable exceptionToThrow, int expectedStatusCode) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException, AdrRevisionExistsException {
         String adrJson = "{ \"title\": \"My ADR\" }";
         if (exceptionToThrow != null) {
             when(mockAdrStore.updateAdrStatus(any(AdrMeta.class), any(Status.class))).thenThrow(exceptionToThrow);

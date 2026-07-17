@@ -6,11 +6,11 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.finos.calm.store.util.VersionKeySelector;
 import org.finos.calm.domain.Flow;
 import org.finos.calm.domain.exception.FlowNotFoundException;
@@ -101,10 +101,9 @@ public class MongoFlowStore implements FlowStore {
                 .append("versions",
                 new Document("1-0-0", Document.parse(flowRequest.getFlowJson())));
 
-        flowCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(flowCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("flows", flowDocument),
-                new UpdateOptions().upsert(true));
+                "flows", flowDocument);
 
         Flow persistedFlow = new Flow.FlowBuilder()
                 .setId(id)

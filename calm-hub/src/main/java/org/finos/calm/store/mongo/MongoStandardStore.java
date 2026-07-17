@@ -5,13 +5,12 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.Standard;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.finos.calm.store.util.VersionKeySelector;
 import org.finos.calm.domain.exception.*;
 import org.finos.calm.domain.standards.CreateStandardRequest;
@@ -98,10 +97,9 @@ public class MongoStandardStore implements StandardStore {
                 .append("versions",
                 new Document("1-0-0", Document.parse(standardRequest.getStandardJson())));
 
-        standardCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(standardCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("standards", standardDocument),
-                new UpdateOptions().upsert(true));
+                "standards", standardDocument);
 
         createdStandard.setId(id);
         createdStandard.setVersion("1.0.0");

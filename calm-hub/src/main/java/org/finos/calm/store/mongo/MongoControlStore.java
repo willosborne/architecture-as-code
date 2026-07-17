@@ -22,6 +22,7 @@ import org.finos.calm.domain.exception.ControlRequirementVersionExistsException;
 import org.finos.calm.domain.exception.ControlRequirementVersionNotFoundException;
 import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.finos.calm.store.ControlStore;
+import org.finos.calm.store.util.MongoUpsertPush;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -121,11 +122,9 @@ public class MongoControlStore implements ControlStore {
                 .append("requirement", requirementVersions)
                 .append("configurations", new ArrayList<>());
 
-        controlCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(controlCollection,
                 Filters.eq("domain", domain),
-                Updates.push("controls", controlDoc),
-                new UpdateOptions().upsert(true)
-        );
+                "controls", controlDoc);
 
         return new ControlDetail(controlId, name, description);
     }

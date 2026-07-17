@@ -35,6 +35,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -229,6 +230,32 @@ public class TestMongoStandardStoreShould {
                 eq(Filters.eq("namespace", validNamespace)),
                 eq(Updates.push("standards", expectedDoc)),
                 any(UpdateOptions.class));
+    }
+
+    @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextStandardSequenceValue()).thenReturn(42);
+        when(standardCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+        CreateStandardRequest standardToCreate = new CreateStandardRequest("test", "Test Standard", "{}");
+
+        mongoStandardStore.createStandardForNamespace(standardToCreate, "finos");
+
+        verify(standardCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_a_standard() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextStandardSequenceValue()).thenReturn(42);
+        when(standardCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+        CreateStandardRequest standardToCreate = new CreateStandardRequest("test", "Test Standard", "{}");
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoStandardStore.createStandardForNamespace(standardToCreate, "finos"));
     }
 
     @Test
