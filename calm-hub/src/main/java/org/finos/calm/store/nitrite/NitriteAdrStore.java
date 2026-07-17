@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -50,7 +50,7 @@ public class NitriteAdrStore implements AdrStore {
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
     private final ObjectMapper objectMapper;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteAdrStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -69,45 +69,50 @@ public class NitriteAdrStore implements AdrStore {
             throw new NamespaceNotFoundException();
         }
 
-        TypeSafeNitriteDocument<Document> namespaceDocument = new TypeSafeNitriteDocument<>(adrCollection.find(where(NAMESPACE_FIELD).eq(namespace)).firstOrNull(), Document.class);
-        List<Document> adrs = namespaceDocument.getList(ADRS_FIELD);
-        if (adrs == null || adrs.isEmpty()) {
-            return List.of();
-        }
+        lock.readLock().lock();
+        try {
+            TypeSafeNitriteDocument<Document> namespaceDocument = new TypeSafeNitriteDocument<>(adrCollection.find(where(NAMESPACE_FIELD).eq(namespace)).firstOrNull(), Document.class);
+            List<Document> adrs = namespaceDocument.getList(ADRS_FIELD);
+            if (adrs == null || adrs.isEmpty()) {
+                return List.of();
+            }
 
-        List<NamespaceAdrSummary> summaries = new ArrayList<>();
-        for (Document adr : adrs) {
-            int adrId = adr.get(ADR_ID_FIELD, Integer.class);
-            String title = "ADR " + adrId;
-            String status = "unknown";
+            List<NamespaceAdrSummary> summaries = new ArrayList<>();
+            for (Document adr : adrs) {
+                int adrId = adr.get(ADR_ID_FIELD, Integer.class);
+                String title = "ADR " + adrId;
+                String status = "unknown";
 
-            Document revisions = adr.get(REVISIONS_FIELD, Document.class);
-            if (revisions != null) {
-                Set<String> fieldNames = revisions.getFields();
-                if (!fieldNames.isEmpty()) {
-                    int latestRevision = fieldNames.stream()
-                            .map(Integer::parseInt)
-                            .mapToInt(i -> i)
-                            .max()
-                            .getAsInt();
-                    String adrStr = revisions.get(String.valueOf(latestRevision), String.class);
-                    if (adrStr != null) {
-                        try {
-                            Adr adrObj = objectMapper.readValue(adrStr, Adr.class);
-                            if (adrObj.getTitle() != null) title = adrObj.getTitle();
-                            if (adrObj.getStatus() != null) status = adrObj.getStatus().name();
-                        } catch (JsonProcessingException e) {
-                            LOG.warn("Could not parse ADR {} for summary, using fallback", adrId, e);
+                Document revisions = adr.get(REVISIONS_FIELD, Document.class);
+                if (revisions != null) {
+                    Set<String> fieldNames = revisions.getFields();
+                    if (!fieldNames.isEmpty()) {
+                        int latestRevision = fieldNames.stream()
+                                .map(Integer::parseInt)
+                                .mapToInt(i -> i)
+                                .max()
+                                .getAsInt();
+                        String adrStr = revisions.get(String.valueOf(latestRevision), String.class);
+                        if (adrStr != null) {
+                            try {
+                                Adr adrObj = objectMapper.readValue(adrStr, Adr.class);
+                                if (adrObj.getTitle() != null) title = adrObj.getTitle();
+                                if (adrObj.getStatus() != null) status = adrObj.getStatus().name();
+                            } catch (JsonProcessingException e) {
+                                LOG.warn("Could not parse ADR {} for summary, using fallback", adrId, e);
+                            }
                         }
                     }
                 }
+
+                summaries.add(new NamespaceAdrSummary(title, status, adrId));
             }
 
-            summaries.add(new NamespaceAdrSummary(title, status, adrId));
+            LOG.debug("Retrieved {} ADRs for namespace '{}'", summaries.size(), namespace);
+            return summaries;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        LOG.debug("Retrieved {} ADRs for namespace '{}'", summaries.size(), namespace);
-        return summaries;
     }
 
     @Override
@@ -130,7 +135,7 @@ public class NitriteAdrStore implements AdrStore {
             throw new AdrParseException();
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextAdrSequenceValue();
             Document adrDocument = Document.createDocument()
@@ -164,91 +169,116 @@ public class NitriteAdrStore implements AdrStore {
             LOG.info("Created ADR with ID {} for namespace '{}'", id, adrMeta.getNamespace());
             return new AdrMeta.AdrMetaBuilder(adrMeta).setId(id).build();
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public AdrMeta getAdr(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrParseException {
-        Document adrDoc = retrieveAdrDoc(adrMeta);
-        return retrieveLatestRevision(adrMeta, adrDoc);
+        lock.readLock().lock();
+        try {
+            Document adrDoc = retrieveAdrDoc(adrMeta);
+            return retrieveLatestRevision(adrMeta, adrDoc);
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
     public List<Integer> getAdrRevisions(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException {
-        Document adrDoc = retrieveAdrDoc(adrMeta);
-        Document revisions = retrieveRevisionsDoc(adrDoc, adrMeta);
+        lock.readLock().lock();
+        try {
+            Document adrDoc = retrieveAdrDoc(adrMeta);
+            Document revisions = retrieveRevisionsDoc(adrDoc, adrMeta);
 
-        List<Integer> revisionList = new ArrayList<>();
-        // In NitriteDB, we need to get the field names directly
-        Set<String> fieldNames = revisions.getFields();
-        for (String revision : fieldNames) {
-            revisionList.add(Integer.parseInt(revision));
+            List<Integer> revisionList = new ArrayList<>();
+            // In NitriteDB, we need to get the field names directly
+            Set<String> fieldNames = revisions.getFields();
+            for (String revision : fieldNames) {
+                revisionList.add(Integer.parseInt(revision));
+            }
+
+            LOG.debug("Retrieved {} revisions for ADR {} in namespace '{}'",
+                    revisionList.size(), adrMeta.getId(), adrMeta.getNamespace());
+            return revisionList;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        LOG.debug("Retrieved {} revisions for ADR {} in namespace '{}'", 
-                revisionList.size(), adrMeta.getId(), adrMeta.getNamespace());
-        return revisionList;
     }
 
     @Override
     public AdrMeta getAdrRevision(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrParseException {
-        Document adrDoc = retrieveAdrDoc(adrMeta);
-        Document revisionsDoc = retrieveRevisionsDoc(adrDoc, adrMeta);
-
-        // Return the ADR JSON blob for the specified revision
-        String adrStr = revisionsDoc.get(String.valueOf(adrMeta.getRevision()), String.class);
-        LOG.info("RevisionDoc: [{}], Revision: [{}]", revisionsDoc, adrMeta.getRevision());
-
-        if (adrStr == null) {
-            LOG.warn("Revision {} not found for ADR {} in namespace '{}'", 
-                    adrMeta.getRevision(), adrMeta.getId(), adrMeta.getNamespace());
-            throw new AdrRevisionNotFoundException();
-        }
-
+        lock.readLock().lock();
         try {
-            return new AdrMeta.AdrMetaBuilder(adrMeta)
-                    .setAdr(objectMapper.readValue(adrStr, Adr.class))
-                    .build();
-        } catch (JsonProcessingException e) {
-            LOG.error("Could not parse stored ADR to ADR Content.", e);
-            throw new AdrParseException();
+            Document adrDoc = retrieveAdrDoc(adrMeta);
+            Document revisionsDoc = retrieveRevisionsDoc(adrDoc, adrMeta);
+
+            // Return the ADR JSON blob for the specified revision
+            String adrStr = revisionsDoc.get(String.valueOf(adrMeta.getRevision()), String.class);
+            LOG.info("RevisionDoc: [{}], Revision: [{}]", revisionsDoc, adrMeta.getRevision());
+
+            if (adrStr == null) {
+                LOG.warn("Revision {} not found for ADR {} in namespace '{}'",
+                        adrMeta.getRevision(), adrMeta.getId(), adrMeta.getNamespace());
+                throw new AdrRevisionNotFoundException();
+            }
+
+            try {
+                return new AdrMeta.AdrMetaBuilder(adrMeta)
+                        .setAdr(objectMapper.readValue(adrStr, Adr.class))
+                        .build();
+            } catch (JsonProcessingException e) {
+                LOG.error("Could not parse stored ADR to ADR Content.", e);
+                throw new AdrParseException();
+            }
+        } finally {
+            lock.readLock().unlock();
         }
     }
 
     @Override
     public AdrMeta updateAdrForNamespace(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
-        Document adrDoc = retrieveAdrDoc(adrMeta);
-        AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
+        lock.writeLock().lock();
+        try {
+            Document adrDoc = retrieveAdrDoc(adrMeta);
+            AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
 
-        int newRevision = latestRevision.getRevision() + 1;
-        AdrMeta newAdrMeta = new AdrMeta.AdrMetaBuilder(adrMeta)
-                .setAdr(new Adr.AdrBuilder(adrMeta.getAdr())
-                        .setStatus(latestRevision.getAdr().getStatus())
-                        .setCreationDateTime(latestRevision.getAdr().getCreationDateTime())
-                        .build())
-                .setRevision(newRevision)
-                .build();
+            int newRevision = latestRevision.getRevision() + 1;
+            AdrMeta newAdrMeta = new AdrMeta.AdrMetaBuilder(adrMeta)
+                    .setAdr(new Adr.AdrBuilder(adrMeta.getAdr())
+                            .setStatus(latestRevision.getAdr().getStatus())
+                            .setCreationDateTime(latestRevision.getAdr().getCreationDateTime())
+                            .build())
+                    .setRevision(newRevision)
+                    .build();
 
-        writeAdrToNitrite(newAdrMeta);
-        return newAdrMeta;
+            writeAdrToNitrite(newAdrMeta);
+            return newAdrMeta;
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     @Override
     public AdrMeta updateAdrStatus(AdrMeta adrMeta, Status status) throws AdrNotFoundException, NamespaceNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
-        Document adrDoc = retrieveAdrDoc(adrMeta);
-        AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
+        lock.writeLock().lock();
+        try {
+            Document adrDoc = retrieveAdrDoc(adrMeta);
+            AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
 
-        int newRevisionNum = latestRevision.getRevision() + 1;
-        AdrMeta newRevision = new AdrMeta.AdrMetaBuilder(latestRevision)
-                .setRevision(newRevisionNum)
-                .setAdr(new Adr.AdrBuilder(latestRevision.getAdr())
-                        .setStatus(status)
-                        .build())
-                .build();
+            int newRevisionNum = latestRevision.getRevision() + 1;
+            AdrMeta newRevision = new AdrMeta.AdrMetaBuilder(latestRevision)
+                    .setRevision(newRevisionNum)
+                    .setAdr(new Adr.AdrBuilder(latestRevision.getAdr())
+                            .setStatus(status)
+                            .build())
+                    .build();
 
-        writeAdrToNitrite(newRevision);
-        return newRevision;
+            writeAdrToNitrite(newRevision);
+            return newRevision;
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     private List<Document> retrieveAdrsDocs(String namespace) throws NamespaceNotFoundException, AdrNotFoundException {

@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 
@@ -49,7 +49,7 @@ public class NitriteTimelineStore implements TimelineStore {
     private final NitriteCollection timelineCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteTimelineStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -66,30 +66,35 @@ public class NitriteTimelineStore implements TimelineStore {
             throw new NamespaceNotFoundException();
         }
 
-        Filter filter = where(NAMESPACE_FIELD).eq(namespace);
-        Document namespaceDoc = timelineCollection.find(filter).firstOrNull();
+        lock.readLock().lock();
+        try {
+            Filter filter = where(NAMESPACE_FIELD).eq(namespace);
+            Document namespaceDoc = timelineCollection.find(filter).firstOrNull();
 
-        if (namespaceDoc == null) {
-            LOG.warn("No timelines found for namespace '{}'", namespace);
-            return List.of();
+            if (namespaceDoc == null) {
+                LOG.warn("No timelines found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<Document> timelines = new TypeSafeNitriteDocument<>(namespaceDoc, Document.class).getList(TIMELINES_FIELD);
+            if (timelines == null || timelines.isEmpty()) {
+                return List.of();
+            }
+
+            List<NamespaceTimelineSummary> timelineSummaries = new ArrayList<>();
+            for (Document timeline : timelines) {
+                Integer timelineId = timeline.get(TIMELINE_ID_FIELD, Integer.class);
+                String name = timeline.get(NAME_FIELD, String.class);
+                String description = timeline.get(DESCRIPTION_FIELD, String.class);
+                if (name == null) name = "Timeline " + timelineId;
+                if (description == null) description = "";
+                timelineSummaries.add(new NamespaceTimelineSummary(name, description, timelineId));
+            }
+
+            return timelineSummaries;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        List<Document> timelines = new TypeSafeNitriteDocument<>(namespaceDoc, Document.class).getList(TIMELINES_FIELD);
-        if (timelines == null || timelines.isEmpty()) {
-            return List.of();
-        }
-
-        List<NamespaceTimelineSummary> timelineSummaries = new ArrayList<>();
-        for (Document timeline : timelines) {
-            Integer timelineId = timeline.get(TIMELINE_ID_FIELD, Integer.class);
-            String name = timeline.get(NAME_FIELD, String.class);
-            String description = timeline.get(DESCRIPTION_FIELD, String.class);
-            if (name == null) name = "Timeline " + timelineId;
-            if (description == null) description = "";
-            timelineSummaries.add(new NamespaceTimelineSummary(name, description, timelineId));
-        }
-
-        return timelineSummaries;
     }
 
     @Override
@@ -101,7 +106,7 @@ public class NitriteTimelineStore implements TimelineStore {
 
         validateTimelineJson(timelineRequest.getTimelineJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextTimelineSequenceValue();
             Document timelineDocument = Document.createDocument()
@@ -142,34 +147,39 @@ public class NitriteTimelineStore implements TimelineStore {
                     .setTimeline(timelineRequest.getTimelineJson())
                     .build();
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public List<String> getTimelineVersions(Timeline timeline) throws NamespaceNotFoundException, TimelineNotFoundException {
-        Document result = retrieveTimelineVersions(timeline);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveTimelineVersions(timeline);
 
-        List<Document> timelines = new TypeSafeNitriteDocument<>(result, Document.class).getList(TIMELINES_FIELD);
-        for (Document timelineDoc : timelines) {
-            if (timeline.getId() == timelineDoc.get(TIMELINE_ID_FIELD, Integer.class)) {
-                // Extract the versions map from the matching timeline
-                Document versions = timelineDoc.get(VERSIONS_FIELD, Document.class);
-                if (versions == null) {
-                    throw new TimelineNotFoundException();
-                }
+            List<Document> timelines = new TypeSafeNitriteDocument<>(result, Document.class).getList(TIMELINES_FIELD);
+            for (Document timelineDoc : timelines) {
+                if (timeline.getId() == timelineDoc.get(TIMELINE_ID_FIELD, Integer.class)) {
+                    // Extract the versions map from the matching timeline
+                    Document versions = timelineDoc.get(VERSIONS_FIELD, Document.class);
+                    if (versions == null) {
+                        throw new TimelineNotFoundException();
+                    }
 
-                // Convert from Nitrite representation
-                List<String> resourceVersions = new ArrayList<>();
-                Set<String> versionKeys = versions.getFields();
-                for (String versionKey : versionKeys) {
-                    resourceVersions.add(versionKey.replace('-', '.'));
+                    // Convert from Nitrite representation
+                    List<String> resourceVersions = new ArrayList<>();
+                    Set<String> versionKeys = versions.getFields();
+                    for (String versionKey : versionKeys) {
+                        resourceVersions.add(versionKey.replace('-', '.'));
+                    }
+                    return resourceVersions;
                 }
-                return resourceVersions;
             }
-        }
 
-        throw new TimelineNotFoundException();
+            throw new TimelineNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private Document retrieveTimelineVersions(Timeline timeline) throws NamespaceNotFoundException, TimelineNotFoundException {
@@ -191,35 +201,40 @@ public class NitriteTimelineStore implements TimelineStore {
 
     @Override
     public String getTimelineForVersion(Timeline timeline) throws NamespaceNotFoundException, TimelineNotFoundException, TimelineVersionNotFoundException {
-        Document result = retrieveTimelineVersions(timeline);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveTimelineVersions(timeline);
 
-        List<Document> timelines = new TypeSafeNitriteDocument<>(result, Document.class).getList(TIMELINES_FIELD);
-        for (Document timelineDoc : timelines) {
-            if (timeline.getId() == timelineDoc.get(TIMELINE_ID_FIELD, Integer.class)) {
-                // Retrieve the versions map from the matching timeline
-                Document versions = timelineDoc.get(VERSIONS_FIELD, Document.class);
-                if (versions == null) {
-                    throw new TimelineVersionNotFoundException();
+            List<Document> timelines = new TypeSafeNitriteDocument<>(result, Document.class).getList(TIMELINES_FIELD);
+            for (Document timelineDoc : timelines) {
+                if (timeline.getId() == timelineDoc.get(TIMELINE_ID_FIELD, Integer.class)) {
+                    // Retrieve the versions map from the matching timeline
+                    Document versions = timelineDoc.get(VERSIONS_FIELD, Document.class);
+                    if (versions == null) {
+                        throw new TimelineVersionNotFoundException();
+                    }
+
+                    // Return the timeline JSON blob for the specified version
+                    String mongoVersion = timeline.getMongoVersion();
+                    Object versionObj = versions.get(mongoVersion);
+                    LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
+
+                    if (!(versionObj instanceof String)) {
+                        LOG.warn("Version '{}' not found for timeline {} in namespace '{}'",
+                                timeline.getDotVersion(), timeline.getId(), timeline.getNamespace());
+                        throw new TimelineVersionNotFoundException();
+                    }
+
+                    return (String) versionObj;
                 }
-
-                // Return the timeline JSON blob for the specified version
-                String mongoVersion = timeline.getMongoVersion();
-                Object versionObj = versions.get(mongoVersion);
-                LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
-
-                if (!(versionObj instanceof String)) {
-                    LOG.warn("Version '{}' not found for timeline {} in namespace '{}'",
-                            timeline.getDotVersion(), timeline.getId(), timeline.getNamespace());
-                    throw new TimelineVersionNotFoundException();
-                }
-
-                return (String) versionObj;
             }
-        }
 
-        // Timelines is empty, no version to find
-        LOG.warn("Timeline with ID {} not found in namespace '{}'", timeline.getId(), timeline.getNamespace());
-        throw new TimelineVersionNotFoundException();
+            // Timelines is empty, no version to find
+            LOG.warn("Timeline with ID {} not found in namespace '{}'", timeline.getId(), timeline.getNamespace());
+            throw new TimelineVersionNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -231,7 +246,7 @@ public class NitriteTimelineStore implements TimelineStore {
 
         validateTimelineJson(timeline.getTimelineJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             if (versionExists(timeline)) {
                 LOG.warn("Version '{}' already exists for timeline {} in namespace '{}'",
@@ -241,7 +256,7 @@ public class NitriteTimelineStore implements TimelineStore {
 
             writeTimelineToNitrite(timeline);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
         return timeline;
     }
@@ -255,7 +270,12 @@ public class NitriteTimelineStore implements TimelineStore {
 
         validateTimelineJson(timeline.getTimelineJson());
 
-        writeTimelineToNitrite(timeline);
+        lock.writeLock().lock();
+        try {
+            writeTimelineToNitrite(timeline);
+        } finally {
+            lock.writeLock().unlock();
+        }
         LOG.info("Updated version '{}' for timeline {} in namespace '{}'",
                 timeline.getDotVersion(), timeline.getId(), timeline.getNamespace());
         return timeline;

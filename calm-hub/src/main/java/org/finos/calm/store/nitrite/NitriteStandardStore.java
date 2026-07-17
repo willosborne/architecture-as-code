@@ -25,8 +25,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -52,7 +52,7 @@ public class NitriteStandardStore implements StandardStore {
     private final NitriteCollection standardCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteStandardStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -70,38 +70,43 @@ public class NitriteStandardStore implements StandardStore {
             throw new NamespaceNotFoundException();
         }
 
-        Filter filter = where(NAMESPACE_FIELD).eq(namespace);
-        Document namespaceDocument = standardCollection.find(filter).firstOrNull();
+        lock.readLock().lock();
+        try {
+            Filter filter = where(NAMESPACE_FIELD).eq(namespace);
+            Document namespaceDocument = standardCollection.find(filter).firstOrNull();
 
-        // If no standards exist for this namespace yet
-        if (namespaceDocument == null) {
-            LOG.debug("No standards found for namespace '{}'", namespace);
-            return List.of();
+            // If no standards exist for this namespace yet
+            if (namespaceDocument == null) {
+                LOG.debug("No standards found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<Document> standards = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(STANDARDS_FIELD);
+            if (standards == null || standards.isEmpty()) {
+                LOG.debug("No standards found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<NamespaceResourceSummary> namespaceStandardSummary = new ArrayList<>();
+
+            for (Document standard : standards) {
+                // Count versions from the already-in-memory sub-document (O(1), no extra query).
+                Object rawVersions = standard.get(VERSIONS_FIELD);
+                int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+                NamespaceResourceSummary summary = new NamespaceResourceSummary(
+                        standard.get(NAME_FIELD, String.class),
+                        standard.get(DESCRIPTION_FIELD, String.class),
+                        standard.get(STANDARD_ID_FIELD, Integer.class),
+                        versionCount
+                );
+                namespaceStandardSummary.add(summary);
+            }
+
+            LOG.debug("Retrieved {} standards for namespace '{}'", namespaceStandardSummary.size(), namespace);
+            return namespaceStandardSummary;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        List<Document> standards = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(STANDARDS_FIELD);
-        if (standards == null || standards.isEmpty()) {
-            LOG.debug("No standards found for namespace '{}'", namespace);
-            return List.of();
-        }
-
-        List<NamespaceResourceSummary> namespaceStandardSummary = new ArrayList<>();
-
-        for (Document standard : standards) {
-            // Count versions from the already-in-memory sub-document (O(1), no extra query).
-            Object rawVersions = standard.get(VERSIONS_FIELD);
-            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
-            NamespaceResourceSummary summary = new NamespaceResourceSummary(
-                    standard.get(NAME_FIELD, String.class),
-                    standard.get(DESCRIPTION_FIELD, String.class),
-                    standard.get(STANDARD_ID_FIELD, Integer.class),
-                    versionCount
-            );
-            namespaceStandardSummary.add(summary);
-        }
-
-        LOG.debug("Retrieved {} standards for namespace '{}'", namespaceStandardSummary.size(), namespace);
-        return namespaceStandardSummary;
     }
 
     @Override
@@ -120,7 +125,7 @@ public class NitriteStandardStore implements StandardStore {
             throw new JsonParseException(e.getMessage());
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextStandardSequenceValue();
 
@@ -159,7 +164,7 @@ public class NitriteStandardStore implements StandardStore {
             createdStandard.setNamespace(namespace);
             return createdStandard;
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
@@ -170,25 +175,30 @@ public class NitriteStandardStore implements StandardStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document standardDoc = findStandardDocument(namespace, standardId);
-        if (standardDoc == null) {
-            LOG.warn("Standard with ID {} not found in namespace '{}'", standardId, namespace);
-            throw new StandardNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document standardDoc = findStandardDocument(namespace, standardId);
+            if (standardDoc == null) {
+                LOG.warn("Standard with ID {} not found in namespace '{}'", standardId, namespace);
+                throw new StandardNotFoundException();
+            }
 
-        Document versions = standardDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new StandardNotFoundException();
-        }
-        Set<String> fieldNames = versions.getFields();
-        List<String> versionList = new ArrayList<>();
-        for (String fieldName : fieldNames) {
-            versionList.add(fieldName.replace('-', '.'));
-        }
+            Document versions = standardDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new StandardNotFoundException();
+            }
+            Set<String> fieldNames = versions.getFields();
+            List<String> versionList = new ArrayList<>();
+            for (String fieldName : fieldNames) {
+                versionList.add(fieldName.replace('-', '.'));
+            }
 
-        LOG.debug("Retrieved {} versions for standard {} in namespace '{}'",
-                versionList.size(), standardId, namespace);
-        return versionList;
+            LOG.debug("Retrieved {} versions for standard {} in namespace '{}'",
+                    versionList.size(), standardId, namespace);
+            return versionList;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -197,30 +207,35 @@ public class NitriteStandardStore implements StandardStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document standardDocument = findStandardDocument(namespace, standardId);
-        if (standardDocument == null) {
-            LOG.warn("Standard with ID {} not found in namespace '{}'", standardId, namespace);
-            throw new StandardNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document standardDocument = findStandardDocument(namespace, standardId);
+            if (standardDocument == null) {
+                LOG.warn("Standard with ID {} not found in namespace '{}'", standardId, namespace);
+                throw new StandardNotFoundException();
+            }
 
-        Document versions = standardDocument.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new StandardVersionNotFoundException();
-        }
+            Document versions = standardDocument.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new StandardVersionNotFoundException();
+            }
 
-        String mongoVersion = version.replace('.', '-');
-        Object versionObj = versions.get(mongoVersion);
+            String mongoVersion = version.replace('.', '-');
+            Object versionObj = versions.get(mongoVersion);
 
-        if (!(versionObj instanceof String)) {
-            LOG.warn("Version '{}' not found for standard {} in namespace '{}'",
+            if (!(versionObj instanceof String)) {
+                LOG.warn("Version '{}' not found for standard {} in namespace '{}'",
+                        mongoVersion, standardId, namespace);
+                throw new StandardVersionNotFoundException();
+            }
+
+            LOG.debug("Retrieved version '{}' for standard {} in namespace '{}'",
                     mongoVersion, standardId, namespace);
-            throw new StandardVersionNotFoundException();
+
+            return (String) versionObj;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        LOG.debug("Retrieved version '{}' for standard {} in namespace '{}'",
-                mongoVersion, standardId, namespace);
-
-        return (String) versionObj;
     }
 
     @Override
@@ -229,7 +244,7 @@ public class NitriteStandardStore implements StandardStore {
             throw new NamespaceNotFoundException();
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             Filter namespaceFilter = where(NAMESPACE_FIELD).eq(namespace);
             Document namespaceDocument = standardCollection.find(namespaceFilter).firstOrNull();
@@ -278,7 +293,7 @@ public class NitriteStandardStore implements StandardStore {
             namespaceDocument.put(STANDARDS_FIELD, standards);
             standardCollection.update(namespaceFilter, namespaceDocument);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
 
         LOG.info("Created version '{}' for standard {} in namespace '{}'",
