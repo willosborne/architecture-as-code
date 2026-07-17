@@ -3,6 +3,7 @@ package integration;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.bson.Document;
@@ -53,8 +54,15 @@ public class PermittedScopesIntegration {
                 );
             }
 
-            if (!database.listCollectionNames().into(new ArrayList<>()).contains("userAccess")) {
-                database.createCollection("userAccess");
+            // Guard on the specific grant, not collection existence: MongoIndexInitializer's
+            // startup index creation on userAccess implicitly creates the (empty) collection
+            // before this ever runs, so "does the collection exist" is never a useful check here.
+            boolean grantExists = database.getCollection("userAccess").find(Filters.and(
+                    Filters.eq("username", "test-user"),
+                    Filters.eq("namespace", "finos"),
+                    Filters.eq("permission", UserAccess.Permission.read.name())
+            )).first() != null;
+            if (!grantExists) {
                 database.getCollection("userAccess").insertOne(
                         new Document("username", "test-user")
                                 .append("namespace", "finos")
