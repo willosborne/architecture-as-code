@@ -3,6 +3,7 @@ package integration;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.bson.Document;
@@ -69,13 +70,25 @@ public class UserAccessGrantsIntegration {
                 database.createCollection("userAccess");
             }
 
-            // test-user has admin access on finos, so they can manage grants there
-            database.getCollection("userAccess").insertOne(
-                    new Document("username", "test-user")
-                            .append("namespace", "finos")
-                            .append("permission", UserAccess.Permission.admin.name())
-                            .append("userAccessId", 101)
-            );
+            // test-user has admin access on finos, so they can manage grants there.
+            // Guarded on the specific grant (not collection existence, since
+            // MongoIndexInitializer's startup index creation on userAccess implicitly
+            // creates the collection before this ever runs) — this @BeforeEach runs before
+            // every test in this class, so without the guard the second test's insert
+            // collides with the first test's leftover document.
+            boolean grantExists = database.getCollection("userAccess").find(Filters.and(
+                    Filters.eq("username", "test-user"),
+                    Filters.eq("namespace", "finos"),
+                    Filters.eq("permission", UserAccess.Permission.admin.name())
+            )).first() != null;
+            if (!grantExists) {
+                database.getCollection("userAccess").insertOne(
+                        new Document("username", "test-user")
+                                .append("namespace", "finos")
+                                .append("permission", UserAccess.Permission.admin.name())
+                                .append("userAccessId", 101)
+                );
+            }
 
             counterSetup(database);
             namespaceSetup(database);

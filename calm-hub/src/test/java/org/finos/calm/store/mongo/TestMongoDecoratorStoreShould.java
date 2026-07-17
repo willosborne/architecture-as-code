@@ -1,9 +1,14 @@
 package org.finos.calm.store.mongo;
 
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.exception.DecoratorNotFoundException;
@@ -28,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -579,6 +585,32 @@ class TestMongoDecoratorStoreShould {
         verify(namespaceStore).namespaceExists(namespace);
         verify(counterStore, never()).getNextDecoratorSequenceValue();
         verify(decoratorCollection, never()).updateOne(any(Bson.class), any(Bson.class), any());
+    }
+
+    @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        String namespace = "finos";
+        when(namespaceStore.namespaceExists(namespace)).thenReturn(true);
+        when(counterStore.getNextDecoratorSequenceValue()).thenReturn(42);
+        when(decoratorCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+
+        decoratorStore.createDecorator(namespace, "{\"unique-id\": \"test-decorator\", \"type\": \"deployment\"}");
+
+        verify(decoratorCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_a_decorator() {
+        String namespace = "finos";
+        when(namespaceStore.namespaceExists(namespace)).thenReturn(true);
+        when(counterStore.getNextDecoratorSequenceValue()).thenReturn(42);
+        when(decoratorCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+
+        assertThrows(MongoWriteException.class,
+                () -> decoratorStore.createDecorator(namespace, "{\"unique-id\": \"test-decorator\", \"type\": \"deployment\"}"));
     }
 
     @Test

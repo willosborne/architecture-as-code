@@ -1,5 +1,8 @@
 package org.finos.calm.store.mongo;
 
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -7,6 +10,7 @@ import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.result.UpdateResult;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.controls.ControlConfigDetail;
@@ -33,6 +37,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -162,6 +167,32 @@ public class TestMongoControlStoreShould {
 
         verify(controlCollection).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
         verify(counterStore).getNextControlSequenceValue();
+    }
+
+    @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws DomainNotFoundException {
+        when(domainStore.getDomains()).thenReturn(List.of("security"));
+        when(counterStore.getNextControlSequenceValue()).thenReturn(5);
+        when(controlCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+        CreateControlRequirement createRequest = new CreateControlRequirement("Test Control", "Test Description", "{}");
+
+        mongoControlStore.createControlRequirement(createRequest, "security");
+
+        verify(controlCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_a_control_requirement() {
+        when(domainStore.getDomains()).thenReturn(List.of("security"));
+        when(counterStore.getNextControlSequenceValue()).thenReturn(5);
+        when(controlCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+        CreateControlRequirement createRequest = new CreateControlRequirement("Test Control", "Test Description", "{}");
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoControlStore.createControlRequirement(createRequest, "security"));
     }
 
     // --- getRequirementVersions ---

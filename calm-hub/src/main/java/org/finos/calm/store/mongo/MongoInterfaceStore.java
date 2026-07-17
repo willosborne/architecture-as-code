@@ -5,14 +5,13 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.CalmInterface;
 import org.finos.calm.domain.exception.*;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.finos.calm.domain.interfaces.CreateInterfaceRequest;
 import org.finos.calm.domain.interfaces.NamespaceInterfaceSummary;
 import org.finos.calm.store.InterfaceStore;
@@ -96,10 +95,9 @@ public class MongoInterfaceStore implements InterfaceStore {
                 .append("versions",
                         new Document("1-0-0", Document.parse(interfaceRequest.getInterfaceJson())));
 
-        interfaceCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(interfaceCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("interfaces", interfaceDocument),
-                new UpdateOptions().upsert(true));
+                "interfaces", interfaceDocument);
 
         createdInterface.setId(id);
         createdInterface.setVersion("1.0.0");

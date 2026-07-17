@@ -39,10 +39,15 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code domains.name} (unique) — one document per domain name</li>
  *   <li>{@code schemas.version} (unique) — one document per schema version string</li>
  *   <li>{@code architectures.namespace}, {@code patterns.namespace}, {@code flows.namespace},
- *       {@code standards.namespace}, {@code interfaces.namespace} (unique) — one document
+ *       {@code timelines.namespace}, {@code standards.namespace}, {@code interfaces.namespace},
+ *       {@code adrs.namespace}, {@code decorators.namespace} (unique) — one document
  *       per namespace in each entity collection, containing an array of that entity type</li>
  *   <li>{@code controls.domain} (unique) — one document per domain, containing an array
  *       of controls</li>
+ *   <li>{@code userAccess.(username, namespace, permission)} and
+ *       {@code userAccess.(username, domain, permission)} (unique, partial) — prevent
+ *       duplicate grants; partial on the presence of {@code namespace}/{@code domain}
+ *       respectively since a grant document has exactly one of the two</li>
  * </ul>
  *
  * <h2>Failure behaviour</h2>
@@ -115,7 +120,7 @@ public class MongoIndexInitializer {
             LOG.info("Ensured unique index on schemas.version");
 
             // Namespace-scoped collections — one document per namespace
-            for (String collection : new String[]{"architectures", "patterns", "flows", "timelines", "standards", "interfaces"}) {
+            for (String collection : new String[]{"architectures", "patterns", "flows", "timelines", "standards", "interfaces", "adrs", "decorators"}) {
                 database.getCollection(collection)
                         .createIndex(new Document("namespace", 1), uniqueIndex);
                 LOG.info("Ensured unique index on {}.namespace", collection);
@@ -134,6 +139,21 @@ public class MongoIndexInitializer {
             database.getCollection("resource_mappings")
                     .createIndex(new Document("namespace", 1).append("resourceType", 1).append("numericId", 1));
             LOG.info("Ensured index on resource_mappings.(namespace, resourceType, numericId)");
+
+            // userAccess grants — partial unique indexes so identical concurrent grants dedupe.
+            // Two partials (not one compound index) because namespace-scoped and domain-scoped
+            // grant documents don't share a discriminating field.
+            database.getCollection("userAccess").createIndex(
+                    new Document("username", 1).append("namespace", 1).append("permission", 1),
+                    new IndexOptions().unique(true)
+                            .partialFilterExpression(new Document("namespace", new Document("$exists", true))));
+            LOG.info("Ensured unique partial index on userAccess.(username, namespace, permission)");
+
+            database.getCollection("userAccess").createIndex(
+                    new Document("username", 1).append("domain", 1).append("permission", 1),
+                    new IndexOptions().unique(true)
+                            .partialFilterExpression(new Document("domain", new Document("$exists", true))));
+            LOG.info("Ensured unique partial index on userAccess.(username, domain, permission)");
         } catch (Exception e) {
             LOG.warn("Failed to create MongoDB indexes — indexes may already exist or MongoDB is unavailable", e);
         }

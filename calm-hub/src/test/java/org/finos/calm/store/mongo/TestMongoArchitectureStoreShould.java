@@ -317,6 +317,38 @@ public class TestMongoArchitectureStoreShould {
     }
 
     @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextArchitectureSequenceValue()).thenReturn(42);
+        when(architectureCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+
+        Architecture architectureToCreate = new Architecture.ArchitectureBuilder().setArchitecture(validJson)
+                .setNamespace(NAMESPACE)
+                .build();
+
+        mongoArchitectureStore.createArchitectureForNamespace(architectureToCreate);
+
+        verify(architectureCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_an_architecture() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextArchitectureSequenceValue()).thenReturn(42);
+        when(architectureCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+
+        Architecture architectureToCreate = new Architecture.ArchitectureBuilder().setArchitecture(validJson)
+                .setNamespace(NAMESPACE)
+                .build();
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoArchitectureStore.createArchitectureForNamespace(architectureToCreate));
+    }
+
+    @Test
     void get_architecture_version_for_invalid_namespace_throws_exception() {
         when(namespaceStore.namespaceExists(anyString())).thenReturn(false);
         Architecture architecture = new Architecture.ArchitectureBuilder().setNamespace("does-not-exist").build();

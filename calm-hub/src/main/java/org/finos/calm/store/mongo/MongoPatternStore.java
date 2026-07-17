@@ -6,12 +6,12 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.Pattern;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.finos.calm.store.util.VersionKeySelector;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.exception.PatternNotFoundException;
@@ -110,10 +110,9 @@ public class MongoPatternStore implements PatternStore {
                 .append("versions",
                 new Document("1-0-0", parsedPattern));
 
-        patternCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(patternCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("patterns", patternDocument),
-                new UpdateOptions().upsert(true));
+                "patterns", patternDocument);
 
         Pattern persistedPattern = new Pattern.PatternBuilder()
                 .setId(id)

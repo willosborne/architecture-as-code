@@ -224,6 +224,32 @@ public class TestMongoTimelineStoreShould {
     }
 
     @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextTimelineSequenceValue()).thenReturn(42);
+        when(timelineCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+        CreateTimelineRequest request = new CreateTimelineRequest("Test Timeline", "A test", validJson);
+
+        mongoTimelineStore.createTimelineForNamespace(request, NAMESPACE);
+
+        verify(timelineCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_a_timeline() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextTimelineSequenceValue()).thenReturn(42);
+        when(timelineCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+        CreateTimelineRequest request = new CreateTimelineRequest("Test Timeline", "A test", validJson);
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoTimelineStore.createTimelineForNamespace(request, NAMESPACE));
+    }
+
+    @Test
     void get_timeline_version_for_invalid_namespace_throws_exception() {
         when(namespaceStore.namespaceExists(anyString())).thenReturn(false);
         Timeline timeline = new Timeline.TimelineBuilder().setNamespace("does-not-exist").build();

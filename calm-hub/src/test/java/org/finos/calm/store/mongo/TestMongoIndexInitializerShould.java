@@ -48,15 +48,20 @@ class TestMongoIndexInitializerShould {
         verify(mockDatabase).getCollection("namespaces");
         verify(mockDatabase).getCollection("domains");
         verify(mockDatabase).getCollection("schemas");
-        // Namespace-scoped: architectures, patterns, flows, standards, interfaces
+        // Namespace-scoped: architectures, patterns, flows, timelines, standards, interfaces, adrs, decorators
         verify(mockDatabase).getCollection("architectures");
         verify(mockDatabase).getCollection("patterns");
         verify(mockDatabase).getCollection("flows");
+        verify(mockDatabase).getCollection("timelines");
         verify(mockDatabase).getCollection("standards");
         verify(mockDatabase).getCollection("interfaces");
+        verify(mockDatabase).getCollection("adrs");
+        verify(mockDatabase).getCollection("decorators");
         // Domain-scoped + resource mappings
         verify(mockDatabase).getCollection("controls");
         verify(mockDatabase, times(2)).getCollection("resource_mappings");
+        // userAccess partial unique indexes
+        verify(mockDatabase, times(2)).getCollection("userAccess");
     }
 
     @Test
