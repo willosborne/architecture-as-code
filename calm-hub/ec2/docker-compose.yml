@@ -36,6 +36,11 @@ services:
     # QUARKUS_PROFILE=standalone, CALM_READONLY=true, the standalone data
     # directory, and disabled auth.
     #
+    # calm.audit.store.enabled/calm.audit.log.enabled default to true, but that's
+    # a no-op on this instance: ReadOnlyRequestFilter rejects every mutating verb
+    # with 405 before AuditRequestFilter (which only runs post-routing) ever sees
+    # the request, so no audit entry can ever be recorded here regardless.
+    #
     # No container HEALTHCHECK: this image is distroless (no shell, no curl),
     # so readiness is probed host-side (see install.sh / redeploy.sh), not
     # from inside the container.
