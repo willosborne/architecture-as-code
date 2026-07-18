@@ -859,17 +859,19 @@ describe('Hub', () => {
             expect(crumbs[1]).toEqual({ namespace: 'test-namespace', type: 'architectures', id: 'arch', version: '1.0' });
         });
 
-        it('ignores references that are not CALM Hub paths, keeping the current view intact', () => {
+        it('routes references that are not CALM Hub paths to the in-app not-found view', () => {
             renderWithLocation(['/test-namespace/architectures/arch/1.0']);
             loadArchitectureWithNodes();
 
             fireEvent.click(screen.getByTestId('navigate-detailed-arch-bad'));
 
-            expect(screen.getByTestId('location-pathname')).toHaveTextContent(
-                '/test-namespace/architectures/arch/1.0'
-            );
-            // No navigation happened, so the loaded diagram was not cleared.
-            expect(screen.getByTestId('diagram-section')).toHaveTextContent('Diagram: arch');
+            // A malformed ref must never leave the app (no new tab onto the
+            // backend's raw 404): it lands on the broken-reference route, which
+            // echoes the raw ref and offers a way back via the pushed crumb.
+            expect(screen.getByTestId('location-pathname')).toHaveTextContent('/broken-reference');
+            expect(screen.getByText('Resource not found')).toBeInTheDocument();
+            expect(screen.getByText('/not/a/calm/path')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Back to arch' })).toBeInTheDocument();
         });
 
         it('filters malformed entries out of untrusted history state', () => {

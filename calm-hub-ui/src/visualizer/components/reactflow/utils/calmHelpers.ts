@@ -43,8 +43,21 @@ export function extractRelationshipType(relationship: CalmRelationshipSchema | n
 
 export type DetailedArchResolution =
     | { type: 'internal'; path: string }
+    | { type: 'invalid'; path: string }
     | { type: 'external' }
     | { type: 'unknown' };
+
+/**
+ * Narrows a resolution to the variants that navigate in-app ('internal' and
+ * 'invalid' — both carry a router path; 'invalid' lands on the not-found view).
+ * Consumers must use this rather than enumerating variants, so a future
+ * navigable variant only needs adding here.
+ */
+export function isNavigableArch(
+    resolution: DetailedArchResolution,
+): resolution is Extract<DetailedArchResolution, { path: string }> {
+    return resolution.type === 'internal' || resolution.type === 'invalid';
+}
 
 export interface ParsedCALMHubPath {
     namespace: string;
@@ -64,17 +77,19 @@ export function parseCALMHubPath(path: string): ParsedCALMHubPath | null {
 }
 
 /**
- * Resolves a detailed-architecture reference to one of three outcomes:
+ * Resolves a detailed-architecture reference to one of four outcomes:
  *  - 'internal': a CALM Hub resource path (bare, or inside a same-hostname URL)
  *    → navigate within the app, using `path`
- *  - 'external': an absolute URL that is not an internal resource → open in a new tab
+ *  - 'invalid': a same-hostname URL whose path is NOT a CALM Hub resource (e.g.
+ *    a missing id segment) → almost certainly a broken hub reference; navigate
+ *    in-app so the not-found view explains it, rather than opening a new tab
+ *    onto the backend's raw 404
+ *  - 'external': an absolute URL on a different hostname → open in a new tab
  *  - 'unknown': any other value → display as plain text
  *
  * Matching is intentionally by hostname, not same-origin: in local dev the UI
  * (e.g. :5173) and the hub backend (:8080) share a hostname but not a port, and
- * hub-issued absolute URLs must still resolve as internal. Only paths that parse
- * as a CALM Hub resource count as internal, so consumers never render an in-app
- * navigation affordance for a path the router cannot handle.
+ * hub-issued absolute URLs must still resolve as internal.
  *
  * The `hostname` parameter defaults to `window.location.hostname` and can be
  * overridden in tests.
@@ -88,8 +103,10 @@ export function resolveDetailedArchitecture(
     if (ref.startsWith('http://') || ref.startsWith('https://')) {
         try {
             const url = new URL(ref);
-            if (url.hostname === hostname && parseCALMHubPath(url.pathname)) {
-                return { type: 'internal', path: url.pathname };
+            if (url.hostname === hostname) {
+                return parseCALMHubPath(url.pathname)
+                    ? { type: 'internal', path: url.pathname }
+                    : { type: 'invalid', path: url.pathname };
             }
             return { type: 'external' };
         } catch {

@@ -78,10 +78,16 @@ export default function Hub() {
     const domainMatch = useMatch('/domain/:domain');
     const detailMatch = useMatch('/:namespace/:type/:id/:version');
     const searchMatch = useMatch('/search');
+    const brokenRefMatch = useMatch('/broken-reference');
     const activeNamespace = namespaceMatch?.params.ns;
     const activeDomain = domainMatch?.params.domain;
     const isDetailRoute = detailMatch !== null;
     const isSearchRoute = searchMatch !== null;
+    const isBrokenRefRoute = brokenRefMatch !== null;
+    // The malformed ref that landed us on /broken-reference, carried in history
+    // state (like breadcrumbs, and equally untyped — validate, don't cast).
+    const brokenRefState = (location.state as { brokenRef?: unknown } | null)?.brokenRef;
+    const brokenRef = typeof brokenRefState === 'string' ? brokenRefState : undefined;
 
     const countsService = useMemo(() => new CountsService(), []);
 
@@ -245,8 +251,7 @@ export default function Hub() {
     }, []);
 
     const handleNavigateToDetailedArch = useCallback((ref: string) => {
-        const parsed = parseCALMHubPath(ref);
-        if (!parsed || !data) return;
+        if (!data) return;
         const currentCrumb: BreadcrumbItem = {
             namespace: data.name,
             type: data.calmType === 'Architectures' ? 'architectures' : 'patterns',
@@ -254,9 +259,18 @@ export default function Hub() {
             version: data.version,
             name: currentDisplayNameRef.current,
         };
-        navigate(`/${parsed.namespace}/${parsed.type}/${parsed.id}/${parsed.version}`, {
-            state: { breadcrumbs: [...readBreadcrumbs(location.state), currentCrumb] }
-        });
+        const breadcrumbs = [...readBreadcrumbs(location.state), currentCrumb];
+        const parsed = parseCALMHubPath(ref);
+        if (parsed) {
+            navigate(`/${parsed.namespace}/${parsed.type}/${parsed.id}/${parsed.version}`, {
+                state: { breadcrumbs }
+            });
+        } else {
+            // A same-host ref the router cannot parse (an 'invalid' resolution,
+            // e.g. a missing id segment): land on the in-app not-found view so
+            // the broken reference is explained with a recovery path.
+            navigate('/broken-reference', { state: { breadcrumbs, brokenRef: ref } });
+        }
     }, [navigate, data, location.state]);
 
     const breadcrumbs = useMemo(() => readBreadcrumbs(location.state), [location.state]);
@@ -349,6 +363,7 @@ export default function Hub() {
         !activeDomain &&
         !isDetailRoute &&
         !isSearchRoute &&
+        !isBrokenRefRoute &&
         !data &&
         !adrData &&
         !controlData &&
@@ -390,10 +405,15 @@ export default function Hub() {
             onControlLoad={handleControlActivate}
             selectedControlId={controlData.controlId}
         />
+    ) : isBrokenRefRoute ? (
+        // A malformed detailed-architecture ref (missing/extra segments): the
+        // raw ref cannot be split into route segments, so echo it verbatim.
+        <ResourceNotFound kind="ref" refPath={brokenRef} breadcrumbs={breadcrumbs} />
     ) : isDetailRoute && resourceLoadFailed && !interfaceData && !adrData && !data ? (
         // The routed resource failed to load: show a recoverable not-found state
         // (never a blank pane). Loaded data wins if a late success ever lands.
         <ResourceNotFound
+            kind="route"
             namespace={detailMatch.params.namespace!}
             id={detailMatch.params.id!}
             version={detailMatch.params.version!}
