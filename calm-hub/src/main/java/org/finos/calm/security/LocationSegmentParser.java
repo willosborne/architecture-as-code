@@ -28,10 +28,11 @@ final class LocationSegmentParser {
         if (locationPath == null || locationPath.isBlank()) {
             return new LocationIds(null, null);
         }
-        List<String> segments = List.of(locationPath.replaceAll("^/+", "").split("/"));
-        if (segments.isEmpty()) {
+        String stripped = locationPath.replaceAll("^/+", "");
+        if (stripped.isBlank()) {
             return new LocationIds(null, null);
         }
+        List<String> segments = List.of(stripped.split("/"));
 
         return switch (entityType) {
             // .../namespaces/{name}  or  .../domains/{name}

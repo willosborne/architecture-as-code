@@ -8,6 +8,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.bson.Document;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -43,6 +44,7 @@ public class MongoAuditLogIntegration {
             }
             """;
 
+    private MongoClient mongoClient;
     private MongoDatabase database;
 
     @BeforeEach
@@ -55,7 +57,7 @@ public class MongoAuditLogIntegration {
             throw new IllegalStateException("MongoDB URI is not set. Check the EndToEndResource configuration.");
         }
 
-        MongoClient mongoClient = MongoClients.create(mongoUri);
+        mongoClient = MongoClients.create(mongoUri);
         database = mongoClient.getDatabase(mongoDatabaseName);
 
         if (!database.listCollectionNames().into(new ArrayList<>()).contains("architectures")) {
@@ -67,6 +69,13 @@ public class MongoAuditLogIntegration {
         counterSetup(database);
         namespaceSetup(database);
         database.getCollection("auditLogs").deleteMany(new Document());
+    }
+
+    @AfterEach
+    public void tearDown() {
+        if (mongoClient != null) {
+            mongoClient.close();
+        }
     }
 
     @Test

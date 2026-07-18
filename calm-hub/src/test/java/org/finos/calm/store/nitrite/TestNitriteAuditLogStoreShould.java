@@ -133,6 +133,18 @@ public class TestNitriteAuditLogStoreShould {
     }
 
     @Test
+    void clamp_a_negative_limit_to_zero_instead_of_throwing() {
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.iterator()).thenReturn(List.of(toDoc("a", LocalDateTime.now())).iterator());
+        when(mockCollection.find()).thenReturn(cursor);
+
+        AuditLogQuery query = new AuditLogQuery();
+        query.setLimit(-1);
+
+        assertThat(store.query(query), is(empty()));
+    }
+
+    @Test
     void query_with_a_filter_when_criteria_present() {
         DocumentCursor cursor = mock(DocumentCursor.class);
         when(cursor.iterator()).thenReturn(new ArrayList<Document>().iterator());

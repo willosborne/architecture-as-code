@@ -26,6 +26,14 @@ class TestLocationSegmentParserShould {
     }
 
     @Test
+    void return_nulls_rather_than_an_empty_entity_id_when_location_path_is_only_slashes() {
+        LocationSegmentParser.LocationIds ids = LocationSegmentParser.parse(AuditEntityType.NAMESPACE, "/");
+
+        assertThat(ids.entityId(), is(nullValue()));
+        assertThat(ids.version(), is(nullValue()));
+    }
+
+    @Test
     void parse_namespace_and_domain_as_last_segment() {
         assertThat(LocationSegmentParser.parse(AuditEntityType.NAMESPACE, "/api/calm/namespaces/finos").entityId(),
                 is("finos"));

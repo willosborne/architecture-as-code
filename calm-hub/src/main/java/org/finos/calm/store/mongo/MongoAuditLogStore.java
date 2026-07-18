@@ -51,7 +51,7 @@ public class MongoAuditLogStore implements AuditLogStore {
             results = results.skip(Math.max(0, query.getOffset()));
         }
         if (query.getLimit() != null) {
-            results = results.limit(query.getLimit());
+            results = results.limit(Math.max(0, query.getLimit()));
         }
         List<AuditLogEntry> entries = new ArrayList<>();
         for (Document doc : results) {

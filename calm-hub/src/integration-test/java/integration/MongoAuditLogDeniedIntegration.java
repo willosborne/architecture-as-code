@@ -10,6 +10,7 @@ import io.quarkus.test.junit.TestProfile;
 import org.bson.Document;
 import org.eclipse.microprofile.config.ConfigProvider;
 import org.finos.calm.domain.UserAccess;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -45,6 +46,7 @@ public class MongoAuditLogDeniedIntegration {
     private static final Logger logger = LoggerFactory.getLogger(MongoAuditLogDeniedIntegration.class);
     private static final String PATTERN = "{\"name\": \"demo-pattern\"}";
 
+    private MongoClient mongoClient;
     private MongoDatabase database;
 
     @BeforeEach
@@ -56,7 +58,7 @@ public class MongoAuditLogDeniedIntegration {
             throw new IllegalStateException("MongoDB URI is not set. Check the EndToEndResource configuration.");
         }
 
-        MongoClient mongoClient = MongoClients.create(mongoUri);
+        mongoClient = MongoClients.create(mongoUri);
         database = mongoClient.getDatabase(mongoDatabaseName);
 
         if (!database.listCollectionNames().into(new ArrayList<>()).contains("patterns")) {
@@ -81,6 +83,13 @@ public class MongoAuditLogDeniedIntegration {
         counterSetup(database);
         namespaceSetup(database);
         database.getCollection("auditLogs").deleteMany(new Document());
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (mongoClient != null) {
+            mongoClient.close();
+        }
     }
 
     private String tokenForTestUser(String authServerUrl) {

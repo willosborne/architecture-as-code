@@ -72,7 +72,13 @@ public class NitriteAuditLogStore implements AuditLogStore {
         if (offset >= entries.size()) {
             return List.of();
         }
-        int end = query.getLimit() == null ? entries.size() : Math.min(entries.size(), offset + query.getLimit());
+        int end;
+        if (query.getLimit() == null) {
+            end = entries.size();
+        } else {
+            long safeLimit = Math.max(query.getLimit(), 0L);
+            end = (int) Math.min(entries.size(), offset + safeLimit);
+        }
         return entries.subList(offset, end);
     }
 
