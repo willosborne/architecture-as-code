@@ -9,6 +9,8 @@ import org.finos.calm.store.AuditLogStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.finos.calm.resources.ResourceValidationConstants.STRICT_SANITIZATION_POLICY;
+
 /**
  * Single write-in point for the audit trail. Independently persists an
  * {@link AuditLogEntry} to the {@link AuditLogStore} and/or emits it as a
@@ -78,19 +80,44 @@ public class AuditService {
             try {
                 auditLogStore.record(entry);
             } catch (Exception e) {
-                LOG.warn("Failed to persist audit log entry: {}", entry, e);
+                LOG.warn("Failed to persist audit log entry: {}", sanitizedSummary(entry), e);
             }
         }
         if (logEnabled) {
             try {
                 AUDIT_LOG.info("AUDIT actor=[{}] action=[{}] entityType=[{}] namespace=[{}] domain=[{}] "
                                 + "entityId=[{}] version=[{}] outcome=[{}] sourceIp=[{}] timestamp=[{}]",
-                        entry.getActor(), entry.getAction(), entry.getEntityType(), entry.getNamespace(),
-                        entry.getDomain(), entry.getEntityId(), entry.getVersion(), entry.getOutcome(),
-                        entry.getSourceIp(), entry.getTimestamp());
+                        sanitize(entry.getActor()), entry.getAction(), entry.getEntityType(),
+                        sanitize(entry.getNamespace()), sanitize(entry.getDomain()), sanitize(entry.getEntityId()),
+                        sanitize(entry.getVersion()), entry.getOutcome(), sanitize(entry.getSourceIp()),
+                        entry.getTimestamp());
             } catch (Exception e) {
-                LOG.warn("Failed to emit audit log line: {}", entry, e);
+                LOG.warn("Failed to emit audit log line: {}", sanitizedSummary(entry), e);
             }
         }
+    }
+
+    /**
+     * Every field here can originate from user-controlled input (path segments, a
+     * Location header built from them, the {@code X-Forwarded-For} header for
+     * {@code sourceIp}) — sanitize before it reaches a log line, per
+     * calm-hub/AGENTS.md's XSS-prevention rule. {@code null}-safe since most fields
+     * are optional depending on entity type/outcome.
+     */
+    private static String sanitize(String value) {
+        return value == null ? null : STRICT_SANITIZATION_POLICY.sanitize(value);
+    }
+
+    private static String sanitizedSummary(AuditLogEntry entry) {
+        return "AuditLogEntry{actor=" + sanitize(entry.getActor())
+                + ", action=" + entry.getAction()
+                + ", entityType=" + entry.getEntityType()
+                + ", namespace=" + sanitize(entry.getNamespace())
+                + ", domain=" + sanitize(entry.getDomain())
+                + ", entityId=" + sanitize(entry.getEntityId())
+                + ", version=" + sanitize(entry.getVersion())
+                + ", outcome=" + entry.getOutcome()
+                + ", sourceIp=" + sanitize(entry.getSourceIp())
+                + ", timestamp=" + entry.getTimestamp() + "}";
     }
 }

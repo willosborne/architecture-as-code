@@ -25,6 +25,7 @@ import org.finos.calm.resources.DomainResource;
 import org.finos.calm.resources.DomainUserAccessResource;
 import org.finos.calm.resources.FlowResource;
 import org.finos.calm.resources.InterfaceResource;
+import org.finos.calm.resources.MappingControllerResource;
 import org.finos.calm.resources.NamespaceResource;
 import org.finos.calm.resources.PatternResource;
 import org.finos.calm.resources.StandardResource;
@@ -38,6 +39,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
+
+import static org.finos.calm.resources.ResourceValidationConstants.STRICT_SANITIZATION_POLICY;
 
 /**
  * Captures an {@link AuditLogEntry} for every mutating (POST/PUT/DELETE) request that
@@ -211,8 +214,8 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         AuditContext staged = STAGED_CONTEXT.get();
         UriInfo uriInfo = requestContext.getUriInfo();
 
-        ResolvedAudit resolved = staged != null
-                ? ResolvedAudit.fromContext(staged)
+        AuditContext resolved = staged != null
+                ? staged
                 : resolve(resourceInfo, uriInfo, method, outcome, responseContext);
         if (resolved == null) {
             return;
@@ -221,12 +224,12 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         AuditLogEntry entry = new AuditLogEntry.AuditLogEntryBuilder()
                 .setTimestamp(LocalDateTime.now(ZoneOffset.UTC))
                 .setActor(resolveActor())
-                .setAction(resolved.action)
-                .setEntityType(resolved.entityType)
-                .setNamespace(resolved.namespace)
-                .setDomain(resolved.domain)
-                .setEntityId(resolved.entityId)
-                .setVersion(resolved.version)
+                .setAction(resolved.action())
+                .setEntityType(resolved.entityType())
+                .setNamespace(resolved.namespace())
+                .setDomain(resolved.domain())
+                .setEntityId(resolved.entityId())
+                .setVersion(resolved.version())
                 .setOutcome(outcome)
                 .setSourceIp(captureSourceIp ? requestContext.getHeaderString("X-Forwarded-For") : null)
                 .build();
@@ -248,16 +251,7 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         return identity == null || identity.isAnonymous() ? "anonymous" : identity.getPrincipal().getName();
     }
 
-    private record ResolvedAudit(AuditEntityType entityType, AuditAction action,
-                                  String namespace, String domain, String entityId, String version) {
-
-        static ResolvedAudit fromContext(AuditContext context) {
-            return new ResolvedAudit(context.entityType(), context.action(), context.namespace(),
-                    context.domain(), context.entityId(), context.version());
-        }
-    }
-
-    private ResolvedAudit resolve(ResourceInfo resourceInfo, UriInfo uriInfo, String method,
+    private AuditContext resolve(ResourceInfo resourceInfo, UriInfo uriInfo, String method,
                                    AuditOutcome outcome, ContainerResponseContext responseContext) {
         Class<?> resourceClass = resourceInfo.getResourceClass();
         String methodName = resourceInfo.getResourceMethod() == null ? "" : resourceInfo.getResourceMethod().getName();
@@ -265,7 +259,7 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         if (resourceClass == ControlResource.class) {
             return resolveControlResource(methodName, uriInfo, outcome, responseContext);
         }
-        if (resourceClass.getSimpleName().equals("MappingControllerResource")) {
+        if (resourceClass == MappingControllerResource.class) {
             return resolveMappingController(methodName, uriInfo, outcome, responseContext);
         }
 
@@ -281,7 +275,7 @@ public class AuditRequestFilter implements ContainerResponseFilter {
      * {@link AuditEntityType} mapping (i.e. everything except {@link ControlResource}
      * and {@code MappingControllerResource}, which have multiple entity shapes per class).
      */
-    private ResolvedAudit resolveGeneric(AuditEntityType entityType, UriInfo uriInfo, String method,
+    private AuditContext resolveGeneric(AuditEntityType entityType, UriInfo uriInfo, String method,
                                           AuditOutcome outcome, ContainerResponseContext responseContext) {
         String namespace = uriInfo.getPathParameters().getFirst("namespace");
         String domain = uriInfo.getPathParameters().getFirst("domain");
@@ -302,36 +296,41 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         }
 
         String entityId = pathEntityId;
-        if (entityId == null && outcome == AuditOutcome.SUCCESS) {
+        // Resolved independently: some types (e.g. ADR) have entityId in the path but no
+        // "version" path param at all, so the revision number can only come from Location —
+        // gating both on a single "entityId == null" check would silently skip that fallback.
+        if ((entityId == null || version == null) && outcome == AuditOutcome.SUCCESS) {
             LocationSegmentParser.LocationIds ids = LocationSegmentParser.parse(entityType, locationPath(responseContext));
-            entityId = ids.entityId();
+            if (entityId == null) {
+                entityId = ids.entityId();
+            }
             if (version == null) {
                 version = ids.version();
             }
         }
 
-        return new ResolvedAudit(entityType, action, namespace, domain, entityId, version);
+        return new AuditContext(entityType, action, namespace, domain, entityId, version);
     }
 
-    private ResolvedAudit resolveControlResource(String methodName, UriInfo uriInfo, AuditOutcome outcome,
+    private AuditContext resolveControlResource(String methodName, UriInfo uriInfo, AuditOutcome outcome,
                                                   ContainerResponseContext responseContext) {
         String domain = uriInfo.getPathParameters().getFirst("domain");
         String version = uriInfo.getPathParameters().getFirst("version");
 
         return switch (methodName) {
             case "createControlForDomain" -> resolveWithLocationFallback(
-                    AuditEntityType.CONTROL_REQUIREMENT, AuditAction.CREATE, null, domain, null, outcome, responseContext);
-            case "createRequirementForVersion" -> new ResolvedAudit(AuditEntityType.CONTROL_REQUIREMENT,
+                    AuditEntityType.CONTROL_REQUIREMENT, domain, outcome, responseContext);
+            case "createRequirementForVersion" -> new AuditContext(AuditEntityType.CONTROL_REQUIREMENT,
                     AuditAction.UPDATE, null, domain, uriInfo.getPathParameters().getFirst("controlId"), version);
             case "createControlConfiguration" -> resolveWithLocationFallback(
-                    AuditEntityType.CONTROL_CONFIGURATION, AuditAction.CREATE, null, domain, null, outcome, responseContext);
-            case "createConfigurationForVersion" -> new ResolvedAudit(AuditEntityType.CONTROL_CONFIGURATION,
+                    AuditEntityType.CONTROL_CONFIGURATION, domain, outcome, responseContext);
+            case "createConfigurationForVersion" -> new AuditContext(AuditEntityType.CONTROL_CONFIGURATION,
                     AuditAction.UPDATE, null, domain, uriInfo.getPathParameters().getFirst("configId"), version);
             default -> null;
         };
     }
 
-    private ResolvedAudit resolveMappingController(String methodName, UriInfo uriInfo, AuditOutcome outcome,
+    private AuditContext resolveMappingController(String methodName, UriInfo uriInfo, AuditOutcome outcome,
                                                      ContainerResponseContext responseContext) {
         String namespace = uriInfo.getPathParameters().getFirst("namespace");
         String domain = uriInfo.getPathParameters().getFirst("domain");
@@ -345,30 +344,36 @@ public class AuditRequestFilter implements ContainerResponseFilter {
             case "createResourceVersion" -> {
                 AuditEntityType entityType = resourceTypeToEntityType(
                         uriInfo.getPathParameters().getFirst("type"));
-                yield entityType == null ? null : new ResolvedAudit(entityType, AuditAction.UPDATE,
+                yield entityType == null ? null : new AuditContext(entityType, AuditAction.UPDATE,
                         namespace, null, uriInfo.getPathParameters().getFirst("name"), version);
             }
             case "createDomain" -> resolveWithLocationFallback(
-                    AuditEntityType.DOMAIN, AuditAction.CREATE, null, null, null, outcome, responseContext);
-            case "createRequirementVersion" -> new ResolvedAudit(AuditEntityType.CONTROL_REQUIREMENT,
+                    AuditEntityType.DOMAIN, null, outcome, responseContext);
+            case "createRequirementVersion" -> new AuditContext(AuditEntityType.CONTROL_REQUIREMENT,
                     AuditAction.UPDATE, null, domain, uriInfo.getPathParameters().getFirst("controlName"), version);
-            case "createConfigurationVersion" -> new ResolvedAudit(AuditEntityType.CONTROL_CONFIGURATION,
+            case "createConfigurationVersion" -> new AuditContext(AuditEntityType.CONTROL_CONFIGURATION,
                     AuditAction.UPDATE, null, domain, uriInfo.getPathParameters().getFirst("configName"), version);
             default -> null;
         };
     }
 
-    private ResolvedAudit resolveWithLocationFallback(AuditEntityType entityType, AuditAction action,
-                                                        String namespace, String domain, String knownEntityId,
+    /**
+     * Resolution for the small set of server-generated-ID CREATE endpoints whose entity
+     * isn't namespace-scoped and has no known ID until the store call succeeds (domain
+     * creation, initial control creation). Every real call site is a CREATE with no
+     * namespace and no already-known entity ID — those aren't parameters because nothing
+     * ever varies them; only {@code entityType} and {@code domain} do.
+     */
+    private AuditContext resolveWithLocationFallback(AuditEntityType entityType, String domain,
                                                         AuditOutcome outcome, ContainerResponseContext responseContext) {
-        String entityId = knownEntityId;
+        String entityId = null;
         String version = null;
-        if (entityId == null && outcome == AuditOutcome.SUCCESS) {
+        if (outcome == AuditOutcome.SUCCESS) {
             LocationSegmentParser.LocationIds ids = LocationSegmentParser.parse(entityType, locationPath(responseContext));
             entityId = ids.entityId();
             version = ids.version();
         }
-        return new ResolvedAudit(entityType, action, namespace, domain, entityId, version);
+        return new AuditContext(entityType, AuditAction.CREATE, null, domain, entityId, version);
     }
 
     /**
@@ -400,7 +405,8 @@ public class AuditRequestFilter implements ContainerResponseFilter {
         try {
             return URI.create(location.toString()).getPath();
         } catch (IllegalArgumentException e) {
-            LOG.debug("Could not parse Location header [{}] for audit logging", location, e);
+            LOG.debug("Could not parse Location header [{}] for audit logging",
+                    STRICT_SANITIZATION_POLICY.sanitize(location.toString()), e);
             return null;
         }
     }

@@ -68,7 +68,7 @@ public class NitriteAuditLogStore implements AuditLogStore {
         }
         entries.sort(Comparator.comparing(AuditLogEntry::getTimestamp,
                 Comparator.nullsLast(Comparator.reverseOrder())));
-        int offset = query.getOffset() == null ? 0 : query.getOffset();
+        int offset = query.getOffset() == null ? 0 : Math.max(0, query.getOffset());
         if (offset >= entries.size()) {
             return List.of();
         }

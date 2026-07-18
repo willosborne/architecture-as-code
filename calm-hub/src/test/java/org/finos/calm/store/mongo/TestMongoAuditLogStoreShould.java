@@ -160,6 +160,24 @@ public class TestMongoAuditLogStoreShould {
     }
 
     @Test
+    void clamp_a_negative_offset_to_zero_instead_of_passing_it_to_mongo() {
+        DocumentFindIterable findIterable = Mockito.mock(DocumentFindIterable.class);
+        DocumentMongoCursor cursor = Mockito.mock(DocumentMongoCursor.class);
+        when(cursor.hasNext()).thenReturn(false);
+        when(findIterable.iterator()).thenReturn(cursor);
+        when(findIterable.sort(any(Document.class))).thenReturn(findIterable);
+        when(findIterable.skip(0)).thenReturn(findIterable);
+        when(auditLogCollection.find(any(Document.class))).thenReturn(findIterable);
+
+        AuditLogQuery query = new AuditLogQuery();
+        query.setOffset(-1);
+
+        store.query(query);
+
+        verify(findIterable).skip(0);
+    }
+
+    @Test
     void map_documents_back_to_entries_preserving_all_fields() {
         LocalDateTime timestamp = LocalDateTime.of(2026, 1, 1, 10, 30);
         Document doc = new Document("timestamp", Date.from(timestamp.toInstant(ZoneOffset.UTC)))

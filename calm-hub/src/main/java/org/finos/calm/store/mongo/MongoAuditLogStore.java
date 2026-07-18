@@ -48,7 +48,7 @@ public class MongoAuditLogStore implements AuditLogStore {
         Document filter = toFilter(query);
         FindIterable<Document> results = auditLogCollection.find(filter).sort(new Document("timestamp", -1));
         if (query.getOffset() != null) {
-            results = results.skip(query.getOffset());
+            results = results.skip(Math.max(0, query.getOffset()));
         }
         if (query.getLimit() != null) {
             results = results.limit(query.getLimit());

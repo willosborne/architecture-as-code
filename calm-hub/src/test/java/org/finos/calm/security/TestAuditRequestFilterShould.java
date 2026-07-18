@@ -94,48 +94,18 @@ public class TestAuditRequestFilterShould {
         return responseContext;
     }
 
-    // java.lang.reflect.Method isn't reliably mockable across JDK versions, so real
-    // reflection objects (of the exact resource method names AuditRequestFilter switches
-    // on) are used instead of mocking Method directly.
-    private Method mockMethod(String name) {
-        try {
-            return DummyResourceMethods.class.getMethod(name);
-        } catch (NoSuchMethodException e) {
-            throw new IllegalStateException(e);
+    // java.lang.reflect.Method isn't reliably mockable across JDK versions, so a real
+    // Method object is used instead of mocking Method directly. Reflecting against the
+    // ACTUAL resource class (not a same-named stub) means renaming the real method in
+    // ControlResource/MappingControllerResource fails this lookup immediately, rather
+    // than leaving the string-matching dispatch in AuditRequestFilter unprotected.
+    private Method mockMethod(Class<?> resourceClass, String name) {
+        for (Method method : resourceClass.getDeclaredMethods()) {
+            if (method.getName().equals(name)) {
+                return method;
+            }
         }
-    }
-
-    @SuppressWarnings("unused")
-    private static final class DummyResourceMethods {
-        public void createControlForDomain() {
-        }
-
-        public void createRequirementForVersion() {
-        }
-
-        public void createControlConfiguration() {
-        }
-
-        public void createConfigurationForVersion() {
-        }
-
-        public void createResourceFromDocument() {
-        }
-
-        public void updateResourceFromDocument() {
-        }
-
-        public void createResourceVersion() {
-        }
-
-        public void createDomain() {
-        }
-
-        public void createRequirementVersion() {
-        }
-
-        public void createConfigurationVersion() {
-        }
+        throw new IllegalStateException("No method named '" + name + "' found on " + resourceClass);
     }
 
     private AuditLogEntry captureRecordedEntry() {
@@ -304,6 +274,9 @@ public class TestAuditRequestFilterShould {
         AuditLogEntry entry = captureRecordedEntry();
         assertThat(entry.getEntityId(), is("9"));
         assertThat(entry.getAction(), is(AuditAction.UPDATE));
+        // Regression check: entityId came from the path param, but the revision number has
+        // no path param at all — it must still be resolved from the Location header.
+        assertThat(entry.getVersion(), is("2"));
     }
 
     // --- Decorator (own-id param is "id") --------------------------------------
@@ -366,7 +339,7 @@ public class TestAuditRequestFilterShould {
     @Test
     void resolve_control_requirement_creation_via_location() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) ControlResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createControlForDomain"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(ControlResource.class, "createControlForDomain"));
         MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
         pathParams.putSingle("domain", "payments");
         ContainerRequestContext requestContext = mockRequest("POST", pathParams);
@@ -385,7 +358,7 @@ public class TestAuditRequestFilterShould {
     @Test
     void resolve_control_configuration_creation_via_location() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) ControlResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createControlConfiguration"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(ControlResource.class, "createControlConfiguration"));
         MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
         pathParams.putSingle("domain", "payments");
         pathParams.putSingle("controlId", "11");
@@ -404,7 +377,7 @@ public class TestAuditRequestFilterShould {
     @Test
     void resolve_control_requirement_version_directly_from_path_params() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) ControlResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createRequirementForVersion"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(ControlResource.class, "createRequirementForVersion"));
         MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
         pathParams.putSingle("domain", "payments");
         pathParams.putSingle("controlId", "11");
@@ -426,7 +399,7 @@ public class TestAuditRequestFilterShould {
     @Test
     void resolve_mapping_controller_versioned_named_resource_via_path_params() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) MappingControllerResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createResourceVersion"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(MappingControllerResource.class, "createResourceVersion"));
         MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
         pathParams.putSingle("namespace", "finos");
         pathParams.putSingle("type", "patterns");
@@ -448,7 +421,7 @@ public class TestAuditRequestFilterShould {
     @Test
     void resolve_mapping_controller_domain_creation_via_location() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) MappingControllerResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createDomain"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(MappingControllerResource.class, "createDomain"));
         ContainerRequestContext requestContext = mockRequest("POST", new MultivaluedHashMap<>());
         ContainerResponseContext responseContext = mockResponse(201, "/calm/domains/payments");
 
@@ -464,7 +437,7 @@ public class TestAuditRequestFilterShould {
         // createResourceFromDocument/updateResourceFromDocument normally stage a context
         // themselves; if that didn't happen (defensive path), nothing reliable to report.
         when(resourceInfo.getResourceClass()).thenReturn((Class) MappingControllerResource.class);
-        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod("createResourceFromDocument"));
+        when(resourceInfo.getResourceMethod()).thenReturn(mockMethod(MappingControllerResource.class, "createResourceFromDocument"));
         ContainerRequestContext requestContext = mockRequest("POST", new MultivaluedHashMap<>());
         ContainerResponseContext responseContext = mockResponse(201, null);
 
