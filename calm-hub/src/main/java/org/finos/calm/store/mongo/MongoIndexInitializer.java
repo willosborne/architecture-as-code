@@ -48,6 +48,13 @@ import org.slf4j.LoggerFactory;
  *       {@code userAccess.(username, domain, permission)} (unique, partial) — prevent
  *       duplicate grants; partial on the presence of {@code namespace}/{@code domain}
  *       respectively since a grant document has exactly one of the two</li>
+ *   <li>{@code auditLogs.(namespace, entityType, entityId, timestamp)},
+ *       {@code auditLogs.(domain, entityType, entityId, timestamp)},
+ *       {@code auditLogs.(actor, timestamp)}, and {@code auditLogs.timestamp} (all
+ *       non-unique) — the audit trail is append-only with no uniqueness invariant to
+ *       protect; these indexes only support the lookup shapes
+ *       {@link org.finos.calm.store.AuditLogStore}'s internal {@code query()} method
+ *       is expected to use</li>
  * </ul>
  *
  * <h2>Failure behaviour</h2>
@@ -86,6 +93,7 @@ public class MongoIndexInitializer {
             return;
         }
         createUniqueIndexes();
+        createAuditIndexes();
     }
 
     /**
@@ -156,6 +164,38 @@ public class MongoIndexInitializer {
             LOG.info("Ensured unique partial index on userAccess.(username, domain, permission)");
         } catch (Exception e) {
             LOG.warn("Failed to create MongoDB indexes — indexes may already exist or MongoDB is unavailable", e);
+        }
+    }
+
+    /**
+     * Creates non-unique lookup indexes on the {@code auditLogs} collection.
+     * <p>
+     * Unlike {@link #createUniqueIndexes()}, none of these enforce uniqueness — the
+     * audit trail is append-only and every record is independent, so there is no
+     * duplicate-prevention concern here. These indexes only support efficient lookups
+     * for {@link org.finos.calm.store.AuditLogStore}'s internal {@code query()} method.
+     */
+    private void createAuditIndexes() {
+        try {
+            database.getCollection("auditLogs")
+                    .createIndex(new Document("namespace", 1).append("entityType", 1)
+                            .append("entityId", 1).append("timestamp", -1));
+            LOG.info("Ensured index on auditLogs.(namespace, entityType, entityId, timestamp)");
+
+            database.getCollection("auditLogs")
+                    .createIndex(new Document("domain", 1).append("entityType", 1)
+                            .append("entityId", 1).append("timestamp", -1));
+            LOG.info("Ensured index on auditLogs.(domain, entityType, entityId, timestamp)");
+
+            database.getCollection("auditLogs")
+                    .createIndex(new Document("actor", 1).append("timestamp", -1));
+            LOG.info("Ensured index on auditLogs.(actor, timestamp)");
+
+            database.getCollection("auditLogs")
+                    .createIndex(new Document("timestamp", -1));
+            LOG.info("Ensured index on auditLogs.timestamp");
+        } catch (Exception e) {
+            LOG.warn("Failed to create MongoDB audit indexes — indexes may already exist or MongoDB is unavailable", e);
         }
     }
 }

@@ -15,7 +15,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.finos.calm.domain.*;
+import org.finos.calm.domain.audit.AuditAction;
+import org.finos.calm.domain.audit.AuditEntityType;
 import org.finos.calm.domain.exception.*;
+import org.finos.calm.security.AuditRequestFilter;
 import org.finos.calm.security.CalmHubPermissionChecker;
 import org.finos.calm.security.CalmHubScopes;
 import org.finos.calm.services.MappingControllerService;
@@ -114,6 +117,10 @@ public class MappingControllerResource {
                 return invalidJsonResponse("Cannot parse request body as JSON");
             }
             if (domainId instanceof CalmDocumentParser.ControlRequirementId r) {
+                // Staged before the permission check below so AuditRequestFilter can record a
+                // fully-identified DENIED entry even though the $id-driven entity isn't in the URL.
+                AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
+                        AuditEntityType.CONTROL_REQUIREMENT, AuditAction.CREATE, null, r.domain(), r.controlName(), r.version()));
                 if (!permissionChecker.canWriteByDomain(identity, r.domain())) {
                     return Response.status(Response.Status.FORBIDDEN)
                             .entity("Insufficient permissions to write to domain: "
@@ -121,6 +128,8 @@ public class MappingControllerResource {
                 }
                 return service.handleControlRequirementPost(r.domain(), r.controlName(), r.version(), requestBody);
             } else if (domainId instanceof CalmDocumentParser.ControlConfigId c) {
+                AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
+                        AuditEntityType.CONTROL_CONFIGURATION, AuditAction.CREATE, null, c.domain(), c.configName(), c.version()));
                 if (!permissionChecker.canWriteByDomain(identity, c.domain())) {
                     return Response.status(Response.Status.FORBIDDEN)
                             .entity("Insufficient permissions to write to domain: "
@@ -139,6 +148,9 @@ public class MappingControllerResource {
         } catch (JsonProcessingException e) {
             return invalidJsonResponse("Cannot parse request body as JSON");
         }
+        AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
+                AuditEntityType.valueOf(canonical.resourceType().name()), AuditAction.CREATE,
+                canonical.namespace(), null, canonical.name(), canonical.version()));
         if (!permissionChecker.canWrite(identity, canonical.namespace())) {
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("Insufficient permissions to write to namespace: "
@@ -181,6 +193,9 @@ public class MappingControllerResource {
         } catch (JsonProcessingException e) {
             return invalidJsonResponse("Cannot parse request body as JSON");
         }
+        AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
+                AuditEntityType.valueOf(canonical.resourceType().name()), AuditAction.UPDATE,
+                canonical.namespace(), null, canonical.name(), canonical.version()));
         if (!permissionChecker.canWrite(identity, canonical.namespace())) {
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("Insufficient permissions to write to namespace: "

@@ -14,10 +14,13 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.finos.calm.domain.NamespaceRequest;
 import org.finos.calm.domain.ValueWrapper;
+import org.finos.calm.domain.audit.AuditAction;
+import org.finos.calm.domain.audit.AuditEntityType;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
 import org.finos.calm.domain.exception.NamespaceParentNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceCounts;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
+import org.finos.calm.security.AuditRequestFilter;
 import org.finos.calm.security.CalmHubPermissionChecker;
 import org.finos.calm.security.UserAccessValidator;
 import org.finos.calm.services.CountsService;
@@ -107,6 +110,12 @@ public class NamespaceResource {
                     .entity("{\"error\":\"'GLOBAL' is a reserved namespace name\"}")
                     .build();
         }
+
+        // Staged before the manual permission check below (not @PermissionsAllowed-guarded,
+        // since the namespace name lives in the body) so AuditRequestFilter can record a
+        // fully-identified DENIED entry, not just an anonymous 403.
+        AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
+                AuditEntityType.NAMESPACE, AuditAction.CREATE, null, null, name, null));
 
         boolean isGlobalAdmin = permissionChecker.hasGlobalAdmin(identity);
         boolean isChildNamespace = name.contains(".");

@@ -1,0 +1,43 @@
+package org.finos.calm.store.producer;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.finos.calm.store.AuditLogStore;
+import org.finos.calm.store.mongo.MongoAuditLogStore;
+import org.finos.calm.store.nitrite.NitriteAuditLogStore;
+
+/**
+ * Producer for {@link AuditLogStore} implementations.
+ * This class provides either the MongoDB or NitriteDB implementation based on configuration.
+ */
+@ApplicationScoped
+public class AuditLogStoreProducer {
+
+    @Inject
+    @ConfigProperty(name = "calm.database.mode", defaultValue = "mongo")
+    String databaseMode;
+
+    @Inject
+    Instance<MongoAuditLogStore> mongoAuditLogStore;
+
+    @Inject
+    Instance<NitriteAuditLogStore> standaloneAuditLogStore;
+
+    /**
+     * Produces the appropriate AuditLogStore implementation based on the configured database mode.
+     *
+     * @return the AuditLogStore implementation
+     */
+    @Produces
+    @ApplicationScoped
+    public AuditLogStore produceAuditLogStore() {
+        if ("standalone".equals(databaseMode)) {
+            return standaloneAuditLogStore.get();
+        } else {
+            return mongoAuditLogStore.get();
+        }
+    }
+}
