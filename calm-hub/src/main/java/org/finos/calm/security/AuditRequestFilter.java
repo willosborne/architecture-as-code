@@ -95,6 +95,15 @@ import static org.finos.calm.resources.ResourceValidationConstants.STRICT_SANITI
  * would ever see the request. 405 is also not in the SUCCESS/DENIED status set this
  * filter records, so no mutation can ever reach this filter's recording logic in
  * read-only mode.
+ *
+ * <h2>{@code no-auth} mode</h2>
+ * {@link #resolveActor()} returns {@code identity.getPrincipal().getName()} for any
+ * non-anonymous identity. In {@code no-auth} mode every caller is granted the same
+ * trusted, non-anonymous principal literally named {@code "no-auth"}
+ * ({@code NoAuthAuthenticationMechanism}), so every audit record's {@code actor} field
+ * is that shared literal, not a real per-caller username — a known limitation of that
+ * deployment mode this filter cannot fix. {@link AuditService#init()} logs a one-time
+ * startup warning about this when audit recording is enabled alongside {@code no-auth}.
  */
 @ApplicationScoped
 @Provider
