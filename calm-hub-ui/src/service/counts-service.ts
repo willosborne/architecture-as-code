@@ -23,7 +23,10 @@ export class CountsService {
         const headers = await getAuthHeaders();
         return this.ax
             .get('/api/calm/namespaces/counts', { headers })
-            .then((res) => (Array.isArray(res.data?.values) ? res.data.values : []))
+            .then((res) => {
+                const values: NamespaceCounts[] = Array.isArray(res.data?.values) ? res.data.values : [];
+                return values.sort((a, b) => a.namespace.localeCompare(b.namespace));
+            })
             .catch((error) => {
                 const errorMessage = 'Error fetching namespace counts:';
                 console.error('%s', errorMessage, error);
