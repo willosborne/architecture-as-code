@@ -27,8 +27,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.finos.calm.store.util.VersionKeySelector;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
@@ -58,7 +58,7 @@ public class NitriteControlStore implements ControlStore {
     private final NitriteCollection controlCollection;
     private final NitriteDomainStore domainStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteControlStore(@StandaloneQualifier Nitrite db, NitriteDomainStore domainStore, NitriteCounterStore counterStore) {
@@ -72,31 +72,36 @@ public class NitriteControlStore implements ControlStore {
     public List<ControlDetail> getControlsForDomain(String domain) throws DomainNotFoundException {
         validateDomain(domain);
 
-        List<ControlDetail> result = new ArrayList<>();
-        for (Document domainDoc : controlCollection.find(where(DOMAIN_FIELD).eq(domain))) {
-            @SuppressWarnings("unchecked")
-            List<Document> controls = (List<Document>) domainDoc.get(CONTROLS_FIELD);
-            if (controls == null) {
-                continue;
+        lock.readLock().lock();
+        try {
+            List<ControlDetail> result = new ArrayList<>();
+            for (Document domainDoc : controlCollection.find(where(DOMAIN_FIELD).eq(domain))) {
+                @SuppressWarnings("unchecked")
+                List<Document> controls = (List<Document>) domainDoc.get(CONTROLS_FIELD);
+                if (controls == null) {
+                    continue;
+                }
+                for (Document control : controls) {
+                    Document requirement = control.get(REQUIREMENT_FIELD, Document.class);
+                    String title = titleFromRequirementNitriteDoc(requirement);
+                    result.add(new ControlDetail(
+                            control.get(CONTROL_ID_FIELD, Integer.class),
+                            control.get("name", String.class),
+                            control.get("description", String.class),
+                            title
+                    ));
+                }
             }
-            for (Document control : controls) {
-                Document requirement = control.get(REQUIREMENT_FIELD, Document.class);
-                String title = titleFromRequirementNitriteDoc(requirement);
-                result.add(new ControlDetail(
-                        control.get(CONTROL_ID_FIELD, Integer.class),
-                        control.get("name", String.class),
-                        control.get("description", String.class),
-                        title
-                ));
-            }
+            return result;
+        } finally {
+            lock.readLock().unlock();
         }
-        return result;
     }
 
     @Override
     public ControlDetail createControlRequirement(CreateControlRequirement request, String domain) throws DomainNotFoundException {
         validateDomain(domain);
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int controlId = counterStore.getNextControlSequenceValue();
 
@@ -137,119 +142,149 @@ public class NitriteControlStore implements ControlStore {
 
             return new ControlDetail(controlId, name, description);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public List<String> getRequirementVersions(String domain, int controlId) throws DomainNotFoundException, ControlNotFoundException {
-        Document controlDoc = findControl(domain, controlId);
-        Document requirement = controlDoc.get(REQUIREMENT_FIELD, Document.class);
-        if (requirement == null) {
-            return List.of();
-        }
+        lock.readLock().lock();
+        try {
+            Document controlDoc = findControl(domain, controlId);
+            Document requirement = controlDoc.get(REQUIREMENT_FIELD, Document.class);
+            if (requirement == null) {
+                return List.of();
+            }
 
-        Set<String> fieldNames = requirement.getFields();
-        List<String> versions = new ArrayList<>();
-        for (String key : fieldNames) {
-            versions.add(key.replace('-', '.'));
+            Set<String> fieldNames = requirement.getFields();
+            List<String> versions = new ArrayList<>();
+            for (String key : fieldNames) {
+                versions.add(key.replace('-', '.'));
+            }
+            return versions;
+        } finally {
+            lock.readLock().unlock();
         }
-        return versions;
     }
 
     @Override
     public String getRequirementForVersion(String domain, int controlId, String version) throws DomainNotFoundException, ControlNotFoundException, ControlRequirementVersionNotFoundException {
-        Document controlDoc = findControl(domain, controlId);
-        Document requirement = controlDoc.get(REQUIREMENT_FIELD, Document.class);
+        lock.readLock().lock();
+        try {
+            Document controlDoc = findControl(domain, controlId);
+            Document requirement = controlDoc.get(REQUIREMENT_FIELD, Document.class);
 
-        if (requirement == null) {
-            throw new ControlRequirementVersionNotFoundException();
+            if (requirement == null) {
+                throw new ControlRequirementVersionNotFoundException();
+            }
+
+            String mongoVersion = version.replace('.', '-');
+            String versionJson = requirement.get(mongoVersion, String.class);
+            if (versionJson == null) {
+                throw new ControlRequirementVersionNotFoundException();
+            }
+
+            return versionJson;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        String mongoVersion = version.replace('.', '-');
-        String versionJson = requirement.get(mongoVersion, String.class);
-        if (versionJson == null) {
-            throw new ControlRequirementVersionNotFoundException();
-        }
-
-        return versionJson;
     }
 
     @Override
     public List<Integer> getConfigurationsForControl(String domain, int controlId) throws DomainNotFoundException, ControlNotFoundException {
-        Document controlDoc = findControl(domain, controlId);
+        lock.readLock().lock();
+        try {
+            Document controlDoc = findControl(domain, controlId);
 
-        @SuppressWarnings("unchecked")
-        List<Document> configurations = (List<Document>) controlDoc.get(CONFIGURATIONS_FIELD);
-        if (configurations == null) {
-            return List.of();
-        }
+            @SuppressWarnings("unchecked")
+            List<Document> configurations = (List<Document>) controlDoc.get(CONFIGURATIONS_FIELD);
+            if (configurations == null) {
+                return List.of();
+            }
 
-        List<Integer> configIds = new ArrayList<>();
-        for (Document config : configurations) {
-            configIds.add(config.get(CONFIGURATION_ID_FIELD, Integer.class));
+            List<Integer> configIds = new ArrayList<>();
+            for (Document config : configurations) {
+                configIds.add(config.get(CONFIGURATION_ID_FIELD, Integer.class));
+            }
+            return configIds;
+        } finally {
+            lock.readLock().unlock();
         }
-        return configIds;
     }
 
     @Override
     public List<ControlConfigDetail> getConfigurationDetailsForControl(String domain, int controlId) throws DomainNotFoundException, ControlNotFoundException {
-        Document controlDoc = findControl(domain, controlId);
+        lock.readLock().lock();
+        try {
+            Document controlDoc = findControl(domain, controlId);
 
-        @SuppressWarnings("unchecked")
-        List<Document> configurations = (List<Document>) controlDoc.get(CONFIGURATIONS_FIELD);
-        if (configurations == null) {
-            return List.of();
-        }
+            @SuppressWarnings("unchecked")
+            List<Document> configurations = (List<Document>) controlDoc.get(CONFIGURATIONS_FIELD);
+            if (configurations == null) {
+                return List.of();
+            }
 
-        List<ControlConfigDetail> details = new ArrayList<>();
-        for (Document config : configurations) {
-            Document versions = config.get(VERSIONS_FIELD, Document.class);
-            String title = titleFromVersionsNitriteDoc(versions);
-            details.add(new ControlConfigDetail(
-                    config.get(CONFIGURATION_ID_FIELD, Integer.class),
-                    config.get("name", String.class),
-                    title));
+            List<ControlConfigDetail> details = new ArrayList<>();
+            for (Document config : configurations) {
+                Document versions = config.get(VERSIONS_FIELD, Document.class);
+                String title = titleFromVersionsNitriteDoc(versions);
+                details.add(new ControlConfigDetail(
+                        config.get(CONFIGURATION_ID_FIELD, Integer.class),
+                        config.get("name", String.class),
+                        title));
+            }
+            return details;
+        } finally {
+            lock.readLock().unlock();
         }
-        return details;
     }
 
     @Override
     public List<String> getConfigurationVersions(String domain, int controlId, int configurationId) throws DomainNotFoundException, ControlNotFoundException, ControlConfigurationNotFoundException {
-        Document configDoc = findConfiguration(domain, controlId, configurationId);
-        Document versions = configDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            return List.of();
-        }
+        lock.readLock().lock();
+        try {
+            Document configDoc = findConfiguration(domain, controlId, configurationId);
+            Document versions = configDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                return List.of();
+            }
 
-        List<String> versionList = new ArrayList<>();
-        for (String key : versions.getFields()) {
-            versionList.add(key.replace('-', '.'));
+            List<String> versionList = new ArrayList<>();
+            for (String key : versions.getFields()) {
+                versionList.add(key.replace('-', '.'));
+            }
+            return versionList;
+        } finally {
+            lock.readLock().unlock();
         }
-        return versionList;
     }
 
     @Override
     public String getConfigurationForVersion(String domain, int controlId, int configurationId, String version) throws DomainNotFoundException, ControlNotFoundException, ControlConfigurationNotFoundException, ControlConfigurationVersionNotFoundException {
-        Document configDoc = findConfiguration(domain, controlId, configurationId);
-        Document versions = configDoc.get(VERSIONS_FIELD, Document.class);
+        lock.readLock().lock();
+        try {
+            Document configDoc = findConfiguration(domain, controlId, configurationId);
+            Document versions = configDoc.get(VERSIONS_FIELD, Document.class);
 
-        if (versions == null) {
-            throw new ControlConfigurationVersionNotFoundException();
+            if (versions == null) {
+                throw new ControlConfigurationVersionNotFoundException();
+            }
+
+            String mongoVersion = version.replace('.', '-');
+            String versionJson = versions.get(mongoVersion, String.class);
+            if (versionJson == null) {
+                throw new ControlConfigurationVersionNotFoundException();
+            }
+
+            return versionJson;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        String mongoVersion = version.replace('.', '-');
-        String versionJson = versions.get(mongoVersion, String.class);
-        if (versionJson == null) {
-            throw new ControlConfigurationVersionNotFoundException();
-        }
-
-        return versionJson;
     }
 
     @Override
     public void createRequirementForVersion(String domain, int controlId, String version, CreateControlRequirement request) throws DomainNotFoundException, ControlNotFoundException, ControlRequirementVersionExistsException {
-        lock.lock();
+        lock.writeLock().lock();
         try {
             validateDomain(domain);
             Document domainDoc = controlCollection.find(where(DOMAIN_FIELD).eq(domain)).firstOrNull();
@@ -279,13 +314,13 @@ public class NitriteControlStore implements ControlStore {
 
             controlCollection.update(where(DOMAIN_FIELD).eq(domain), domainDoc);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public int createControlConfiguration(CreateControlConfiguration request, String domain, int controlId) throws DomainNotFoundException, ControlNotFoundException {
-        lock.lock();
+        lock.writeLock().lock();
         try {
             validateDomain(domain);
             Document domainDoc = controlCollection.find(where(DOMAIN_FIELD).eq(domain)).firstOrNull();
@@ -315,13 +350,13 @@ public class NitriteControlStore implements ControlStore {
 
             return configurationId;
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public void createConfigurationForVersion(String domain, int controlId, int configurationId, String version, CreateControlConfiguration request) throws DomainNotFoundException, ControlNotFoundException, ControlConfigurationNotFoundException, ControlConfigurationVersionExistsException {
-        lock.lock();
+        lock.writeLock().lock();
         try {
             validateDomain(domain);
             Document domainDoc = controlCollection.find(where(DOMAIN_FIELD).eq(domain)).firstOrNull();
@@ -343,7 +378,7 @@ public class NitriteControlStore implements ControlStore {
 
             controlCollection.update(where(DOMAIN_FIELD).eq(domain), domainDoc);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 

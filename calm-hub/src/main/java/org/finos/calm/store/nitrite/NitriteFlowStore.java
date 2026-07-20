@@ -25,8 +25,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -52,7 +52,7 @@ public class NitriteFlowStore implements FlowStore {
     private final NitriteCollection flowCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteFlowStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -69,33 +69,38 @@ public class NitriteFlowStore implements FlowStore {
             throw new NamespaceNotFoundException();
         }
 
-        Filter filter = where(NAMESPACE_FIELD).eq(namespace);
-        Document namespaceDoc = flowCollection.find(filter).firstOrNull();
+        lock.readLock().lock();
+        try {
+            Filter filter = where(NAMESPACE_FIELD).eq(namespace);
+            Document namespaceDoc = flowCollection.find(filter).firstOrNull();
 
-        if (namespaceDoc == null) {
-            LOG.warn("No flows found for namespace '{}'", namespace);
-            return List.of();
+            if (namespaceDoc == null) {
+                LOG.warn("No flows found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<Document> flows = new TypeSafeNitriteDocument<>(namespaceDoc, Document.class).getList(FLOWS_FIELD);
+            if (flows == null || flows.isEmpty()) {
+                return List.of();
+            }
+
+            List<NamespaceResourceSummary> flowSummaries = new ArrayList<>();
+            for (Document flow : flows) {
+                Integer flowId = flow.get(FLOW_ID_FIELD, Integer.class);
+                String name = flow.get(NAME_FIELD, String.class);
+                String description = flow.get(DESCRIPTION_FIELD, String.class);
+                if (name == null) name = "Flow " + flowId;
+                if (description == null) description = "";
+                // Count versions from the already-in-memory sub-document (O(1), no extra query).
+                Object rawVersions = flow.get(VERSIONS_FIELD);
+                int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+                flowSummaries.add(new NamespaceResourceSummary(name, description, flowId, versionCount));
+            }
+
+            return flowSummaries;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        List<Document> flows = new TypeSafeNitriteDocument<>(namespaceDoc, Document.class).getList(FLOWS_FIELD);
-        if (flows == null || flows.isEmpty()) {
-            return List.of();
-        }
-
-        List<NamespaceResourceSummary> flowSummaries = new ArrayList<>();
-        for (Document flow : flows) {
-            Integer flowId = flow.get(FLOW_ID_FIELD, Integer.class);
-            String name = flow.get(NAME_FIELD, String.class);
-            String description = flow.get(DESCRIPTION_FIELD, String.class);
-            if (name == null) name = "Flow " + flowId;
-            if (description == null) description = "";
-            // Count versions from the already-in-memory sub-document (O(1), no extra query).
-            Object rawVersions = flow.get(VERSIONS_FIELD);
-            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
-            flowSummaries.add(new NamespaceResourceSummary(name, description, flowId, versionCount));
-        }
-
-        return flowSummaries;
     }
 
     @Override
@@ -114,7 +119,7 @@ public class NitriteFlowStore implements FlowStore {
             throw new JsonParseException(e.getMessage());
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextFlowSequenceValue();
             Document flowDocument = Document.createDocument()
@@ -155,33 +160,38 @@ public class NitriteFlowStore implements FlowStore {
                     .setFlow(flowRequest.getFlowJson())
                     .build();
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public List<String> getFlowVersions(Flow flow) throws NamespaceNotFoundException, FlowNotFoundException {
-        Document result = retrieveFlowVersions(flow);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveFlowVersions(flow);
 
-        List<Document> flows = new TypeSafeNitriteDocument<>(result, Document.class).getList(FLOWS_FIELD);
-        for (Document flowDoc : flows) {
-            if (flow.getId() == flowDoc.get(FLOW_ID_FIELD, Integer.class)) {
-                // Extract the versions map from the matching flow
-                Document versions = flowDoc.get(VERSIONS_FIELD, Document.class);
+            List<Document> flows = new TypeSafeNitriteDocument<>(result, Document.class).getList(FLOWS_FIELD);
+            for (Document flowDoc : flows) {
+                if (flow.getId() == flowDoc.get(FLOW_ID_FIELD, Integer.class)) {
+                    // Extract the versions map from the matching flow
+                    Document versions = flowDoc.get(VERSIONS_FIELD, Document.class);
 
-                // Convert from Nitrite representation
-                List<String> resourceVersions = new ArrayList<>();
-                if (versions != null) {
-                    Set<String> versionKeys = versions.getFields();
-                    for (String versionKey : versionKeys) {
-                        resourceVersions.add(versionKey.replace('-', '.'));
+                    // Convert from Nitrite representation
+                    List<String> resourceVersions = new ArrayList<>();
+                    if (versions != null) {
+                        Set<String> versionKeys = versions.getFields();
+                        for (String versionKey : versionKeys) {
+                            resourceVersions.add(versionKey.replace('-', '.'));
+                        }
                     }
+                    return resourceVersions;  // Return the list of version keys
                 }
-                return resourceVersions;  // Return the list of version keys
             }
-        }
 
-        throw new FlowNotFoundException();
+            throw new FlowNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private Document retrieveFlowVersions(Flow flow) throws NamespaceNotFoundException, FlowNotFoundException {
@@ -203,34 +213,39 @@ public class NitriteFlowStore implements FlowStore {
 
     @Override
     public String getFlowForVersion(Flow flow) throws NamespaceNotFoundException, FlowNotFoundException, FlowVersionNotFoundException {
-        Document result = retrieveFlowVersions(flow);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveFlowVersions(flow);
 
-        List<Document> flows = new TypeSafeNitriteDocument<>(result, Document.class).getList(FLOWS_FIELD);
-        for (Document flowDoc : flows) {
-            if (flow.getId() == flowDoc.get(FLOW_ID_FIELD, Integer.class)) {
-                // Retrieve the versions map from the matching flow
-                Document versions = flowDoc.get(VERSIONS_FIELD, Document.class);
+            List<Document> flows = new TypeSafeNitriteDocument<>(result, Document.class).getList(FLOWS_FIELD);
+            for (Document flowDoc : flows) {
+                if (flow.getId() == flowDoc.get(FLOW_ID_FIELD, Integer.class)) {
+                    // Retrieve the versions map from the matching flow
+                    Document versions = flowDoc.get(VERSIONS_FIELD, Document.class);
 
-                // Return the flow JSON blob for the specified version
-                String mongoVersion = flow.getMongoVersion();
-                Object versionObj = versions.get(mongoVersion);
-                LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
+                    // Return the flow JSON blob for the specified version
+                    String mongoVersion = flow.getMongoVersion();
+                    Object versionObj = versions.get(mongoVersion);
+                    LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
 
-                if (versionObj == null) {
-                    LOG.warn("Version '{}' not found for flow {} in namespace '{}'", 
-                            flow.getDotVersion(), flow.getId(), flow.getNamespace());
-                    throw new FlowVersionNotFoundException();
+                    if (versionObj == null) {
+                        LOG.warn("Version '{}' not found for flow {} in namespace '{}'",
+                                flow.getDotVersion(), flow.getId(), flow.getNamespace());
+                        throw new FlowVersionNotFoundException();
+                    }
+
+                    // In NitriteDB, we're storing the JSON as a string directly
+                    // No need to convert to JSON string
+                    return (String) versionObj;
                 }
-
-                // In NitriteDB, we're storing the JSON as a string directly
-                // No need to convert to JSON string
-                return (String) versionObj;
             }
-        }
 
-        // Flows is empty, no version to find
-        LOG.warn("Flow with ID {} not found in namespace '{}'", flow.getId(), flow.getNamespace());
-        throw new FlowVersionNotFoundException();
+            // Flows is empty, no version to find
+            LOG.warn("Flow with ID {} not found in namespace '{}'", flow.getId(), flow.getNamespace());
+            throw new FlowVersionNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -240,7 +255,7 @@ public class NitriteFlowStore implements FlowStore {
             throw new NamespaceNotFoundException();
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             if (versionExists(flow)) {
                 LOG.warn("Version '{}' already exists for flow {} in namespace '{}'",
@@ -250,7 +265,7 @@ public class NitriteFlowStore implements FlowStore {
 
             writeFlowToNitrite(flow);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
         return flow;
     }
@@ -262,8 +277,13 @@ public class NitriteFlowStore implements FlowStore {
             throw new NamespaceNotFoundException();
         }
 
-        writeFlowToNitrite(flow);
-        LOG.info("Updated version '{}' for flow {} in namespace '{}'", 
+        lock.writeLock().lock();
+        try {
+            writeFlowToNitrite(flow);
+        } finally {
+            lock.writeLock().unlock();
+        }
+        LOG.info("Updated version '{}' for flow {} in namespace '{}'",
                 flow.getDotVersion(), flow.getId(), flow.getNamespace());
         return flow;
     }
