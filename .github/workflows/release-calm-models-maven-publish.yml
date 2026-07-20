@@ -1,0 +1,82 @@
+name: "CALM models - publish to Maven Central"
+
+on:
+    pull_request:
+        types: [closed]
+        branches: [main]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    publish-central:
+        name: Publish CALM models to Maven Central
+        if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release-prep/calm-models-v')
+        runs-on: ubuntu-latest
+        steps:
+            - name: Extract release version
+              id: version
+              run: |
+                REF="${{ github.event.pull_request.head.ref }}"
+                echo "release_version=${REF#release-prep/calm-models-v}" >> "$GITHUB_OUTPUT"
+
+            - name: Checkout main at merge commit
+              uses: actions/checkout@v4
+              with:
+                ref: ${{ github.event.pull_request.merge_commit_sha }}
+                token: ${{ secrets.GITHUB_TOKEN }}
+                persist-credentials: true
+                fetch-depth: 0
+
+            - name: Setup JDK 21 and auto-generate Sonatype settings
+              uses: actions/setup-java@v4
+              with:
+                distribution: 'temurin'
+                java-version: '21'
+                server-id: central
+                server-username: CI_DEPLOY_USERNAME
+                server-password: CI_DEPLOY_PASSWORD
+                gpg-private-key: ${{ secrets.CI_GPG_PRIVATE_KEY }}
+                gpg-passphrase: CI_GPG_PASSPHRASE
+
+            - name: Establish Git Deployment Author Info
+              run: |
+                git config --global user.name "github-actions[bot]"
+                git config --global user.email "github-actions[bot]@users.noreply.github.com"
+                git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+            - name: Tag release
+              run: |
+                RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
+                git tag -a "calm-models-v${RELEASE_VERSION}" -m "calm-models v${RELEASE_VERSION}"
+                git push origin "calm-models-v${RELEASE_VERSION}"
+
+            - name: Build and deploy to Maven Central
+              run: |
+                ./mvnw -B -Prelease -DskipTests -pl :calm-models deploy
+              env:
+                CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
+                CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
+                CI_GPG_PASSPHRASE: ${{ secrets.CI_GPG_PASSPHRASE }}
+
+            # Bumps to the next SNAPSHOT and opens a PR (rather than pushing to main
+            # directly), for the same reason release-calm-models-maven.yml does: main
+            # requires PRs.
+            - name: Prepare next development iteration PR
+              env:
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
+                IFS='.' read -r MAJOR MINOR PATCH <<< "$RELEASE_VERSION"
+                NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))-SNAPSHOT"
+                BRANCH="release-prep/calm-models-next-dev-v${NEXT_VERSION}"
+                git checkout -b "$BRANCH"
+                ./mvnw -q versions:set -pl calm-models -DnewVersion="${NEXT_VERSION}" -DgenerateBackupPoms=false
+                git commit -am "ci(calm-models): prepare next development iteration v${NEXT_VERSION}"
+                git push origin "$BRANCH"
+                gh pr create --repo ${{ github.repository }} \
+                  --base main \
+                  --head "$BRANCH" \
+                  --title "ci(calm-models): prepare next development iteration v${NEXT_VERSION}" \
+                  --body "Bumps \`calm-models\` to \`${NEXT_VERSION}\` following the release of v${RELEASE_VERSION}."

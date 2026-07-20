@@ -1,17 +1,18 @@
-name: "Release and publish CALM models to Maven Central"
+name: "CALM models - prepare release PR"
 
 on:
     workflow_dispatch:
     push:
         branches:
             - 'release/calm-models-*'
-            
+
 permissions:
     contents: write
+    pull-requests: write
 
 jobs:
-    publish-central:
-        name: Publish CALM models to Maven Central
+    prepare-release:
+        name: Prepare CALM models release PR
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
@@ -25,28 +26,51 @@ jobs:
               with:
                 distribution: 'temurin'
                 java-version: '21'
-                server-id: central
-                server-username: CI_DEPLOY_USERNAME
-                server-password: CI_DEPLOY_PASSWORD
-                gpg-private-key: ${{ secrets.CI_GPG_PRIVATE_KEY }}
-                gpg-passphrase: CI_GPG_PASSPHRASE
 
             - name: Establish Git Deployment Author Info
               run: |
                 git config --global user.name "github-actions[bot]"
                 git config --global user.email "github-actions[bot]@users.noreply.github.com"
-                git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
-            - name: Execute release lifecycle (Isolating calm-models module)
+            - name: Compute release version
+              id: version
               run: |
-                ./mvnw -B release:prepare release:perform \
-                  -pl :calm-models -am \
-                  -DpreparationGoals=clean \
-                  -DreleaseProfiles=release \
-                  -Darguments="-Prelease -DskipTests -pl :calm-models" \
-                  -DignoreSnapshots=true \
-                  -DinteractiveMode=false
+                CURRENT_VERSION=$(./mvnw -q -pl calm-models help:evaluate -Dexpression=project.version -DforceStdout)
+                if [[ "$CURRENT_VERSION" != *-SNAPSHOT ]]; then
+                  echo "calm-models is not on a SNAPSHOT version ($CURRENT_VERSION) - nothing to release." >&2
+                  exit 1
+                fi
+                RELEASE_VERSION="${CURRENT_VERSION%-SNAPSHOT}"
+                echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+
+            - name: Check for an existing release PR
               env:
-                CI_DEPLOY_USERNAME: ${{ secrets.CI_DEPLOY_USERNAME }}
-                CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}
-                CI_GPG_PASSPHRASE: ${{ secrets.CI_GPG_PASSPHRASE }}
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                BRANCH="release-prep/calm-models-v${{ steps.version.outputs.release_version }}"
+                EXISTING=$(gh pr list --repo ${{ github.repository }} --state open \
+                  --json headRefName --jq "[.[] | select(.headRefName == \"$BRANCH\")] | length")
+                if [ "$EXISTING" -gt 0 ]; then
+                  echo "A release PR for v${{ steps.version.outputs.release_version }} ($BRANCH) is already open. Merge or close it before preparing another release." >&2
+                  exit 1
+                fi
+
+            # main is a protected branch (requires PRs), so the version-bump commit for the
+            # release is pushed to a branch and opened as a PR rather than pushed directly.
+            # Merging the PR triggers release-calm-models-maven-publish.yml, which tags,
+            # builds, and deploys to Maven Central.
+            - name: Bump calm-models to release version and open PR
+              env:
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
+                BRANCH="release-prep/calm-models-v${RELEASE_VERSION}"
+                git checkout -b "$BRANCH"
+                ./mvnw -q versions:set -pl calm-models -DnewVersion="${RELEASE_VERSION}" -DgenerateBackupPoms=false
+                git commit -am "ci(calm-models): release v${RELEASE_VERSION}"
+                git push origin "$BRANCH"
+                gh pr create --repo ${{ github.repository }} \
+                  --base main \
+                  --head "$BRANCH" \
+                  --title "ci(calm-models): release v${RELEASE_VERSION}" \
+                  --body "Bumps \`calm-models\` to release version \`${RELEASE_VERSION}\`. Merging this PR publishes it to Maven Central and opens a follow-up PR for the next development iteration."
