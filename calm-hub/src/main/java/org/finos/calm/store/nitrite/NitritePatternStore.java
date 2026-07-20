@@ -26,8 +26,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -53,7 +53,7 @@ public class NitritePatternStore implements PatternStore {
     private final NitriteCollection patternCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitritePatternStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -70,41 +70,46 @@ public class NitritePatternStore implements PatternStore {
             throw new NamespaceNotFoundException();
         }
 
-        Filter filter = where(NAMESPACE_FIELD).eq(namespace);
-        Document namespaceDocument = patternCollection.find(filter).firstOrNull();
+        lock.readLock().lock();
+        try {
+            Filter filter = where(NAMESPACE_FIELD).eq(namespace);
+            Document namespaceDocument = patternCollection.find(filter).firstOrNull();
 
-        // If no patterns exist for this namespace yet
-        if (namespaceDocument == null) {
-            LOG.debug("No patterns found for namespace '{}'", namespace);
-            return List.of();
-        }
+            // If no patterns exist for this namespace yet
+            if (namespaceDocument == null) {
+                LOG.debug("No patterns found for namespace '{}'", namespace);
+                return List.of();
+            }
 
-        List<NamespaceResourceSummary> patternSummaries = new ArrayList<>();
-        // Get patterns list with proper type handling
-        List<Object> rawPatterns = new TypeSafeNitriteDocument<>(namespaceDocument, Object.class).getList(PATTERNS_FIELD);
+            List<NamespaceResourceSummary> patternSummaries = new ArrayList<>();
+            // Get patterns list with proper type handling
+            List<Object> rawPatterns = new TypeSafeNitriteDocument<>(namespaceDocument, Object.class).getList(PATTERNS_FIELD);
 
-        if (rawPatterns != null) {
-            for (Object patternObj : rawPatterns) {
-                if (patternObj instanceof Document patternDoc) {
-                    Integer patternId = patternDoc.get(PATTERN_ID_FIELD, Integer.class);
-                    String name = patternDoc.get(NAME_FIELD, String.class);
-                    String description = patternDoc.get(DESCRIPTION_FIELD, String.class);
-                    if (patternId != null) {
-                        if (name == null) name = "Pattern " + patternId;
-                        if (description == null) description = "";
-                        // Count versions from the already-in-memory sub-document (O(1), no extra query).
-                        Object rawVersions = patternDoc.get(VERSIONS_FIELD);
-                        int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
-                        patternSummaries.add(new NamespaceResourceSummary(name, description, patternId, versionCount));
+            if (rawPatterns != null) {
+                for (Object patternObj : rawPatterns) {
+                    if (patternObj instanceof Document patternDoc) {
+                        Integer patternId = patternDoc.get(PATTERN_ID_FIELD, Integer.class);
+                        String name = patternDoc.get(NAME_FIELD, String.class);
+                        String description = patternDoc.get(DESCRIPTION_FIELD, String.class);
+                        if (patternId != null) {
+                            if (name == null) name = "Pattern " + patternId;
+                            if (description == null) description = "";
+                            // Count versions from the already-in-memory sub-document (O(1), no extra query).
+                            Object rawVersions = patternDoc.get(VERSIONS_FIELD);
+                            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+                            patternSummaries.add(new NamespaceResourceSummary(name, description, patternId, versionCount));
+                        }
                     }
                 }
             }
-        }
 
-        // Nitrite has no array-slice projection, so apply the limit/offset window in memory.
-        List<NamespaceResourceSummary> pageResults = page.apply(patternSummaries);
-        LOG.debug("Retrieved {} of {} patterns for namespace '{}'", pageResults.size(), patternSummaries.size(), namespace);
-        return pageResults;
+            // Nitrite has no array-slice projection, so apply the limit/offset window in memory.
+            List<NamespaceResourceSummary> pageResults = page.apply(patternSummaries);
+            LOG.debug("Retrieved {} of {} patterns for namespace '{}'", pageResults.size(), patternSummaries.size(), namespace);
+            return pageResults;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -116,7 +121,7 @@ public class NitritePatternStore implements PatternStore {
 
         validatePatternJson(patternRequest.getPatternJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextPatternSequenceValue();
 
@@ -164,7 +169,7 @@ public class NitritePatternStore implements PatternStore {
             LOG.info("Created pattern with ID {} for namespace '{}'", id, namespace);
             return persistedPattern;
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
@@ -175,25 +180,30 @@ public class NitritePatternStore implements PatternStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
-        if (patternDoc == null) {
-            LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
-            throw new PatternNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
+            if (patternDoc == null) {
+                LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
+                throw new PatternNotFoundException();
+            }
 
-        Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new PatternNotFoundException();
-        }
-        Set<String> fieldNames = versions.getFields();
-        List<String> versionList = new ArrayList<>();
-        for (String fieldName : fieldNames) {
-            versionList.add(fieldName.replace('-', '.'));
-        }
+            Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new PatternNotFoundException();
+            }
+            Set<String> fieldNames = versions.getFields();
+            List<String> versionList = new ArrayList<>();
+            for (String fieldName : fieldNames) {
+                versionList.add(fieldName.replace('-', '.'));
+            }
 
-        LOG.debug("Retrieved {} versions for pattern {} in namespace '{}'",
-                versionList.size(), pattern.getId(), pattern.getNamespace());
-        return versionList;
+            LOG.debug("Retrieved {} versions for pattern {} in namespace '{}'",
+                    versionList.size(), pattern.getId(), pattern.getNamespace());
+            return versionList;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -203,27 +213,32 @@ public class NitritePatternStore implements PatternStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
-        if (patternDoc == null) {
-            LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
-            throw new PatternNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
+            if (patternDoc == null) {
+                LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
+                throw new PatternNotFoundException();
+            }
 
-        Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new PatternVersionNotFoundException();
-        }
-        Object versionObj = versions.get(pattern.getMongoVersion());
+            Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new PatternVersionNotFoundException();
+            }
+            Object versionObj = versions.get(pattern.getMongoVersion());
 
-        if (!(versionObj instanceof String)) {
-            LOG.warn("Version '{}' not found for pattern {} in namespace '{}'",
+            if (!(versionObj instanceof String)) {
+                LOG.warn("Version '{}' not found for pattern {} in namespace '{}'",
+                        pattern.getMongoVersion(), pattern.getId(), pattern.getNamespace());
+                throw new PatternVersionNotFoundException();
+            }
+
+            LOG.debug("Retrieved version '{}' for pattern {} in namespace '{}'",
                     pattern.getMongoVersion(), pattern.getId(), pattern.getNamespace());
-            throw new PatternVersionNotFoundException();
+            return (String) versionObj;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        LOG.debug("Retrieved version '{}' for pattern {} in namespace '{}'",
-                pattern.getMongoVersion(), pattern.getId(), pattern.getNamespace());
-        return (String) versionObj;
     }
 
     @Override
@@ -235,7 +250,7 @@ public class NitritePatternStore implements PatternStore {
 
         validatePatternJson(pattern.getPatternJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             Filter namespaceFilter = where(NAMESPACE_FIELD).eq(pattern.getNamespace());
             Document namespaceDocument = patternCollection.find(namespaceFilter).firstOrNull();
@@ -289,7 +304,7 @@ public class NitritePatternStore implements PatternStore {
             namespaceDocument.put(PATTERNS_FIELD, patterns);
             patternCollection.update(namespaceFilter, namespaceDocument);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
 
         LOG.info("Created version '{}' for pattern {} in namespace '{}'",
@@ -306,50 +321,55 @@ public class NitritePatternStore implements PatternStore {
 
         validatePatternJson(pattern.getPatternJson());
 
-        Filter namespaceFilter = where(NAMESPACE_FIELD).eq(pattern.getNamespace());
-        Document namespaceDocument = patternCollection.find(namespaceFilter).firstOrNull();
+        lock.writeLock().lock();
+        try {
+            Filter namespaceFilter = where(NAMESPACE_FIELD).eq(pattern.getNamespace());
+            Document namespaceDocument = patternCollection.find(namespaceFilter).firstOrNull();
 
-        if (namespaceDocument == null) {
-            LOG.warn("Namespace document for '{}' not found when updating pattern version", pattern.getNamespace());
-            throw new PatternNotFoundException();
-        }
-
-        Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
-        if (patternDoc == null) {
-            LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
-            throw new PatternNotFoundException();
-        }
-
-        Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new PatternNotFoundException();
-        }
-        versions.put(pattern.getMongoVersion(), pattern.getPatternJson());
-        patternDoc.put(VERSIONS_FIELD, versions);
-
-        // Defensive: the REST layer enforces @NotBlank on name/description via CreatePatternRequest,
-        // so these guards are only reachable by non-REST callers (e.g. direct store usage in tests).
-        if (pattern.getName() != null && !pattern.getName().isBlank()) {
-            patternDoc.put(NAME_FIELD, pattern.getName());
-        }
-        if (pattern.getDescription() != null && !pattern.getDescription().isBlank()) {
-            patternDoc.put(DESCRIPTION_FIELD, pattern.getDescription());
-        }
-
-        // Update the pattern in the namespace document
-        List<Document> patterns = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(PATTERNS_FIELD);
-        // Create a mutable copy of the list
-        patterns = new ArrayList<>(patterns);
-        for (int i = 0; i < patterns.size(); i++) {
-            Document doc = patterns.get(i);
-            if (doc.get(PATTERN_ID_FIELD, Integer.class) == pattern.getId()) {
-                patterns.set(i, patternDoc);
-                break;
+            if (namespaceDocument == null) {
+                LOG.warn("Namespace document for '{}' not found when updating pattern version", pattern.getNamespace());
+                throw new PatternNotFoundException();
             }
-        }
 
-        namespaceDocument.put(PATTERNS_FIELD, patterns);
-        patternCollection.update(namespaceFilter, namespaceDocument);
+            Document patternDoc = findPatternDocument(pattern.getNamespace(), pattern.getId());
+            if (patternDoc == null) {
+                LOG.warn("Pattern with ID {} not found in namespace '{}'", pattern.getId(), pattern.getNamespace());
+                throw new PatternNotFoundException();
+            }
+
+            Document versions = patternDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new PatternNotFoundException();
+            }
+            versions.put(pattern.getMongoVersion(), pattern.getPatternJson());
+            patternDoc.put(VERSIONS_FIELD, versions);
+
+            // Defensive: the REST layer enforces @NotBlank on name/description via CreatePatternRequest,
+            // so these guards are only reachable by non-REST callers (e.g. direct store usage in tests).
+            if (pattern.getName() != null && !pattern.getName().isBlank()) {
+                patternDoc.put(NAME_FIELD, pattern.getName());
+            }
+            if (pattern.getDescription() != null && !pattern.getDescription().isBlank()) {
+                patternDoc.put(DESCRIPTION_FIELD, pattern.getDescription());
+            }
+
+            // Update the pattern in the namespace document
+            List<Document> patterns = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(PATTERNS_FIELD);
+            // Create a mutable copy of the list
+            patterns = new ArrayList<>(patterns);
+            for (int i = 0; i < patterns.size(); i++) {
+                Document doc = patterns.get(i);
+                if (doc.get(PATTERN_ID_FIELD, Integer.class) == pattern.getId()) {
+                    patterns.set(i, patternDoc);
+                    break;
+                }
+            }
+
+            namespaceDocument.put(PATTERNS_FIELD, patterns);
+            patternCollection.update(namespaceFilter, namespaceDocument);
+        } finally {
+            lock.writeLock().unlock();
+        }
 
         LOG.info("Updated version '{}' for pattern {} in namespace '{}'",
                 pattern.getMongoVersion(), pattern.getId(), pattern.getNamespace());

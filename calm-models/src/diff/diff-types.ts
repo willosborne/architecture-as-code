@@ -62,13 +62,13 @@ export interface StringDiffItem {
 type AdrDiffItem = StringDiffItem;
 
 interface ControlItemDetailsDiffItem {
-    content: CalmControlDetailSchema,
-    changeType: ChangeType 
+    content: CalmControlDetailSchema;
+    changeType: ChangeType;
 }
 
 export interface ControlItemDiffResult {
     descriptionDiff: StringDiffItem[];
-    requirementsDiff: ControlItemDetailsDiffItem[]
+    requirementsDiff: ControlItemDetailsDiffItem[];
 }
 
 export interface NodesAndRelationshipsDiffResult {
@@ -99,10 +99,10 @@ export interface AdrDiffResult {
  * Represents the result of diffing two CALM Controls schema objects.
  */
 export interface ControlDiffResult {
-    controlItemsAdded: CalmControlsSchema,
-    controlItemsRemoved: CalmControlsSchema,
-    controlItemsUnchanged: CalmControlsSchema,
-    controlItemsModified: { [controlId: string]: ControlItemDiffResult },
+    controlItemsAdded: CalmControlsSchema;
+    controlItemsRemoved: CalmControlsSchema;
+    controlItemsUnchanged: CalmControlsSchema;
+    controlItemsModified: { [controlId: string]: ControlItemDiffResult };
 }
 
 /**

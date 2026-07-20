@@ -374,6 +374,64 @@ public class NitriteConcurrencyIntegration {
         assertNoDataLoss(THREADS + 1, versionCount, "PatternVersion");
     }
 
+    /**
+     * Regression test for a race where an unsynchronized read (iterating a version Document's
+     * fields) could observe a Nitrite document mid-mutation while a writer held the store's lock,
+     * throwing ConcurrentModificationException and surfacing as a 500. Reads now share a
+     * ReentrantReadWriteLock read lock that excludes concurrent writers, so this must stay clean
+     * across every Nitrite store that mutates a versions/requirement Document in place.
+     */
+    @Test
+    void concurrent_reads_during_pattern_version_writes_produce_no_server_errors() {
+        Response createResponse = given()
+                .contentType(ContentType.JSON)
+                .body("""
+                        {
+                            "name": "read-write-race-pattern",
+                            "description": "for read/write race concurrency test",
+                            "patternJson": "{\\"v\\": \\"1.0.0\\"}"
+                        }
+                        """)
+                .when().post("/api/calm/namespaces/finos/patterns")
+                .thenReturn();
+        assertEquals(201, createResponse.getStatusCode());
+
+        List<Integer> patternIds = extractIdsFromLocations(List.of(createResponse), "patterns/(\\d+)");
+        int patternId = patternIds.get(0);
+
+        int writerCount = THREADS / 2;
+
+        // Half the threads each create a new version; the other half repeatedly hit the versions
+        // list endpoint (which iterates the same in-memory Document the writers mutate). Every
+        // response - reader or writer - must stay below 500.
+        ConcurrencyResult<Integer> result = runConcurrently(THREADS, new java.util.concurrent.atomic.AtomicInteger(0), (index) -> {
+            if (index < writerCount) {
+                return given()
+                        .contentType(ContentType.JSON)
+                        .body("{\"name\":\"read-write-race-pattern\",\"description\":\"for read/write race concurrency test\",\"patternJson\":\"{\\\"v\\\": \\\"" + (index + 2) + ".0.0\\\"}\"}")
+                        .when().post("/api/calm/namespaces/finos/patterns/" + patternId + "/versions/" + (index + 2) + ".0.0")
+                        .thenReturn().getStatusCode();
+            }
+
+            int worstStatus = 200;
+            for (int i = 0; i < 10; i++) {
+                int status = given()
+                        .when().get("/api/calm/namespaces/finos/patterns/" + patternId + "/versions")
+                        .thenReturn().getStatusCode();
+                if (status > worstStatus) {
+                    worstStatus = status;
+                }
+            }
+            return worstStatus;
+        });
+
+        assertTrue(result.allSucceeded(), "Some requests failed: " + result.errors());
+        List<Integer> statusCodes = result.successfulResults();
+        for (int i = 0; i < statusCodes.size(); i++) {
+            assertTrue(statusCodes.get(i) < 500, "Request " + i + " returned server error status " + statusCodes.get(i));
+        }
+    }
+
     @Test
     void concurrent_control_requirement_version_creation_no_data_loss() {
         // Pre-create a named control at version 1.0.0 via the requirement endpoint.

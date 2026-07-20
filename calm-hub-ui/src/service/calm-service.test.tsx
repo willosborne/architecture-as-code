@@ -42,6 +42,31 @@ describe('CalmService', () => {
             mock.onGet('/api/calm/namespaces').reply(500, { message: 'Error' });
             await expect(calmService.fetchNamespaces()).rejects.toThrowError();
         });
+
+        it('should return namespaces in alphabetical order regardless of API response order', async () => {
+            mock.onGet('/api/calm/namespaces').reply(200, {
+                values: [
+                    { name: 'zebra', description: '' },
+                    { name: 'apple', description: '' },
+                    { name: 'mango', description: '' },
+                ],
+            });
+            const actual = await calmService.fetchNamespaces();
+            expect(actual).toEqual(['apple', 'mango', 'zebra']);
+        });
+    });
+
+    describe('fetchDomains', () => {
+        it('should return domains in alphabetical order regardless of API response order', async () => {
+            mock.onGet('/api/calm/domains').reply(200, { values: ['wholesale', 'retail'] });
+            const actual = await calmService.fetchDomains();
+            expect(actual).toEqual(['retail', 'wholesale']);
+        });
+
+        it('should throw an error when backend returns error status', async () => {
+            mock.onGet('/api/calm/domains').reply(500, { message: 'Error' });
+            await expect(calmService.fetchDomains()).rejects.toThrowError();
+        });
     });
 
     describe('fetchPatternSummaries', () => {

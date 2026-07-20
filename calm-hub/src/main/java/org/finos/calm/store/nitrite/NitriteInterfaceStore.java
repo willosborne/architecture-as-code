@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -51,7 +51,7 @@ public class NitriteInterfaceStore implements InterfaceStore {
     private final NitriteCollection interfaceCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteInterfaceStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -68,33 +68,38 @@ public class NitriteInterfaceStore implements InterfaceStore {
             throw new NamespaceNotFoundException();
         }
 
-        Filter filter = where(NAMESPACE_FIELD).eq(namespace);
-        Document namespaceDocument = interfaceCollection.find(filter).firstOrNull();
+        lock.readLock().lock();
+        try {
+            Filter filter = where(NAMESPACE_FIELD).eq(namespace);
+            Document namespaceDocument = interfaceCollection.find(filter).firstOrNull();
 
-        if (namespaceDocument == null) {
-            LOG.debug("No interfaces found for namespace '{}'", namespace);
-            return List.of();
+            if (namespaceDocument == null) {
+                LOG.debug("No interfaces found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<Document> interfaces = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(INTERFACES_FIELD);
+            if (interfaces == null || interfaces.isEmpty()) {
+                LOG.debug("No interfaces found for namespace '{}'", namespace);
+                return List.of();
+            }
+
+            List<NamespaceInterfaceSummary> namespaceInterfaceSummary = new ArrayList<>();
+
+            for (Document interfaceDoc : interfaces) {
+                NamespaceInterfaceSummary summary = new NamespaceInterfaceSummary(
+                        interfaceDoc.get(NAME_FIELD, String.class),
+                        interfaceDoc.get(DESCRIPTION_FIELD, String.class),
+                        interfaceDoc.get(INTERFACE_ID_FIELD, Integer.class)
+                );
+                namespaceInterfaceSummary.add(summary);
+            }
+
+            LOG.debug("Retrieved {} interfaces for namespace '{}'", namespaceInterfaceSummary.size(), namespace);
+            return namespaceInterfaceSummary;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        List<Document> interfaces = new TypeSafeNitriteDocument<>(namespaceDocument, Document.class).getList(INTERFACES_FIELD);
-        if (interfaces == null || interfaces.isEmpty()) {
-            LOG.debug("No interfaces found for namespace '{}'", namespace);
-            return List.of();
-        }
-
-        List<NamespaceInterfaceSummary> namespaceInterfaceSummary = new ArrayList<>();
-
-        for (Document interfaceDoc : interfaces) {
-            NamespaceInterfaceSummary summary = new NamespaceInterfaceSummary(
-                    interfaceDoc.get(NAME_FIELD, String.class),
-                    interfaceDoc.get(DESCRIPTION_FIELD, String.class),
-                    interfaceDoc.get(INTERFACE_ID_FIELD, Integer.class)
-            );
-            namespaceInterfaceSummary.add(summary);
-        }
-
-        LOG.debug("Retrieved {} interfaces for namespace '{}'", namespaceInterfaceSummary.size(), namespace);
-        return namespaceInterfaceSummary;
     }
 
     @Override
@@ -112,7 +117,7 @@ public class NitriteInterfaceStore implements InterfaceStore {
             throw new JsonParseException(e.getMessage());
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextInterfaceSequenceValue();
 
@@ -151,7 +156,7 @@ public class NitriteInterfaceStore implements InterfaceStore {
             createdInterface.setNamespace(namespace);
             return createdInterface;
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
@@ -162,25 +167,30 @@ public class NitriteInterfaceStore implements InterfaceStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document interfaceDoc = findInterfaceDocument(namespace, interfaceId);
-        if (interfaceDoc == null) {
-            LOG.warn("Interface with ID {} not found in namespace '{}'", interfaceId, namespace);
-            throw new InterfaceNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document interfaceDoc = findInterfaceDocument(namespace, interfaceId);
+            if (interfaceDoc == null) {
+                LOG.warn("Interface with ID {} not found in namespace '{}'", interfaceId, namespace);
+                throw new InterfaceNotFoundException();
+            }
 
-        Document versions = interfaceDoc.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new InterfaceNotFoundException();
-        }
-        Set<String> fieldNames = versions.getFields();
-        List<String> versionList = new ArrayList<>();
-        for (String fieldName : fieldNames) {
-            versionList.add(fieldName.replace('-', '.'));
-        }
+            Document versions = interfaceDoc.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new InterfaceNotFoundException();
+            }
+            Set<String> fieldNames = versions.getFields();
+            List<String> versionList = new ArrayList<>();
+            for (String fieldName : fieldNames) {
+                versionList.add(fieldName.replace('-', '.'));
+            }
 
-        LOG.debug("Retrieved {} versions for interface {} in namespace '{}'",
-                versionList.size(), interfaceId, namespace);
-        return versionList;
+            LOG.debug("Retrieved {} versions for interface {} in namespace '{}'",
+                    versionList.size(), interfaceId, namespace);
+            return versionList;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -189,30 +199,35 @@ public class NitriteInterfaceStore implements InterfaceStore {
             throw new NamespaceNotFoundException();
         }
 
-        Document interfaceDocument = findInterfaceDocument(namespace, interfaceId);
-        if (interfaceDocument == null) {
-            LOG.warn("Interface with ID {} not found in namespace '{}'", interfaceId, namespace);
-            throw new InterfaceNotFoundException();
-        }
+        lock.readLock().lock();
+        try {
+            Document interfaceDocument = findInterfaceDocument(namespace, interfaceId);
+            if (interfaceDocument == null) {
+                LOG.warn("Interface with ID {} not found in namespace '{}'", interfaceId, namespace);
+                throw new InterfaceNotFoundException();
+            }
 
-        Document versions = interfaceDocument.get(VERSIONS_FIELD, Document.class);
-        if (versions == null) {
-            throw new InterfaceVersionNotFoundException();
-        }
+            Document versions = interfaceDocument.get(VERSIONS_FIELD, Document.class);
+            if (versions == null) {
+                throw new InterfaceVersionNotFoundException();
+            }
 
-        String storedVersion = version.replace('.', '-');
-        Object versionObj = versions.get(storedVersion);
+            String storedVersion = version.replace('.', '-');
+            Object versionObj = versions.get(storedVersion);
 
-        if (!(versionObj instanceof String)) {
-            LOG.warn("Version '{}' not found for interface {} in namespace '{}'",
+            if (!(versionObj instanceof String)) {
+                LOG.warn("Version '{}' not found for interface {} in namespace '{}'",
+                        storedVersion, interfaceId, namespace);
+                throw new InterfaceVersionNotFoundException();
+            }
+
+            LOG.debug("Retrieved version '{}' for interface {} in namespace '{}'",
                     storedVersion, interfaceId, namespace);
-            throw new InterfaceVersionNotFoundException();
+
+            return (String) versionObj;
+        } finally {
+            lock.readLock().unlock();
         }
-
-        LOG.debug("Retrieved version '{}' for interface {} in namespace '{}'",
-                storedVersion, interfaceId, namespace);
-
-        return (String) versionObj;
     }
 
     @Override
@@ -221,7 +236,7 @@ public class NitriteInterfaceStore implements InterfaceStore {
             throw new NamespaceNotFoundException();
         }
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             Filter namespaceFilter = where(NAMESPACE_FIELD).eq(namespace);
             Document namespaceDocument = interfaceCollection.find(namespaceFilter).firstOrNull();
@@ -269,7 +284,7 @@ public class NitriteInterfaceStore implements InterfaceStore {
             namespaceDocument.put(INTERFACES_FIELD, interfaces);
             interfaceCollection.update(namespaceFilter, namespaceDocument);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
 
         LOG.info("Created version '{}' for interface {} in namespace '{}'",

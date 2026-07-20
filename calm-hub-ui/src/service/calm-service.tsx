@@ -55,7 +55,7 @@ export class CalmService {
                 const namespaces = (res.data?.values ?? [])
                     .map((v: { name?: string }) => v?.name)
                     .filter((name: string | undefined): name is string => !!name);
-                return namespaces;
+                return namespaces.sort((a: string, b: string) => a.localeCompare(b));
             })
             .catch((error) => {
                 const errorMessage = 'Error fetching namespaces:';
@@ -69,7 +69,8 @@ export class CalmService {
         return this.ax
             .get('/api/calm/domains', { headers })
             .then((res) => {
-                return Array.isArray(res.data?.values) ? res.data.values : [];
+                const domains: string[] = Array.isArray(res.data?.values) ? res.data.values : [];
+                return domains.sort((a, b) => a.localeCompare(b));
             })
             .catch((error) => {
                 const errorMessage = 'Error fetching domains:';

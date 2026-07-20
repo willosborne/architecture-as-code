@@ -39,13 +39,13 @@ export function EntitlementsPanel({ calmService, userAccessService }: Entitlemen
 
     useEffect(() => {
         calmSvc.fetchDomains()
-            .then((d) => setDomains([...d].sort()))
+            .then(setDomains)
             .catch(() => setDomainsError('Failed to load domains.'))
             .finally(() => setDomainsLoading(false));
     }, [calmSvc]);
 
     const loading = namespacesLoading || domainsLoading || accessLoading;
-    const adminNamespaces = namespaces.filter(canAdminNamespace).sort();
+    const adminNamespaces = namespaces.filter(canAdminNamespace);
     const error = namespacesError ?? domainsError ?? accessError;
 
     return (
