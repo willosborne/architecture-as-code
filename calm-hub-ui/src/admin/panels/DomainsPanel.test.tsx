@@ -200,7 +200,7 @@ describe('DomainsPanel', () => {
         it('shows a server error and keeps the dialog open when delete fails', async () => {
             const svc = mockService(['retail']);
             vi.spyOn(svc, 'deleteDomain').mockRejectedValue(
-                new Error("Domain 'retail' contains controls and cannot be deleted")
+                new Error('Domain retail contains controls and cannot be deleted')
             );
             renderPanel(svc);
             await screen.findByText('retail');

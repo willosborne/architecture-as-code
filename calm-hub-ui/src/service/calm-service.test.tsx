@@ -161,9 +161,9 @@ describe('CalmService', () => {
 
         it('should surface the server-provided error message when the domain is not empty', async () => {
             mock.onDelete('/api/calm/domains/retail')
-                .reply(409, "Domain 'retail' contains controls and cannot be deleted");
+                .reply(409, 'Domain retail contains controls and cannot be deleted');
             await expect(calmService.deleteDomain('retail'))
-                .rejects.toThrowError("Domain 'retail' contains controls and cannot be deleted");
+                .rejects.toThrowError('Domain retail contains controls and cannot be deleted');
         });
     });
 
