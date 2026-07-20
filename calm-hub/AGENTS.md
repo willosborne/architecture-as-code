@@ -542,6 +542,27 @@ private static final int PATTERN_ID = 42;
 7. Declare `@Produces(MediaType.APPLICATION_JSON)` on every method, and sanitize any
    user-derived value echoed into a response body or log with `STRICT_SANITIZATION_POLICY.sanitize(...)`
    (see [Preventing Cross-Site Scripting (XSS) in Responses](#preventing-cross-site-scripting-xss-in-responses))
+8. **A new mutating endpoint gets audit-trail coverage automatically** — no action needed —
+   as long as it follows the existing `{namespace|domain}/.../{id}[/versions/{version}]`
+   path convention and, for server-generated IDs, returns `Response.created(...)` with a
+   `Location` that embeds the new ID (see [Audit Logging](#audit-logging)). A one-line
+   addition is only needed in `AuditRequestFilter`'s `RESOURCE_CLASS_TO_ENTITY_TYPE` map
+   (and `LocationSegmentParser` if the new entity is server-ID-generated) when introducing
+   a genuinely new resource *type*, not a new endpoint on an existing one.
+
+## Audit Logging
+
+Every mutating (POST/PUT/DELETE) request that completes with a 2xx or 401/403 status is
+recorded to the `auditLogs` collection (and, if enabled, a structured log line under the
+`org.finos.calm.audit` category) by `security/AuditRequestFilter.java`, a post-matching
+`ContainerResponseFilter` — deliberately *not* `@PreMatching` like `ReadOnlyRequestFilter`,
+since it needs `UriInfo.getPathParameters()` resolved after routing. See that class's
+javadoc for the full entity-resolution design (path params → `Location`-header fallback →
+staged `AuditContext` for the handful of body-derived endpoints). `store/AuditLogStore.java`
+is append-only (no `update`/`delete`) and follows the standard Mongo/Nitrite dual-backend
+pattern. Toggle independently with `calm.audit.store.enabled` / `calm.audit.log.enabled` /
+`calm.audit.capture-source-ip` (all in `application.properties`). No REST API exposes the
+trail in this iteration — read it via direct DB access or ops tooling.
 
 ### Adding a New Storage Backend
 1. Create package: `org.finos.calm.store.mybackend`
