@@ -208,6 +208,23 @@ public class TestAuditRequestFilterShould {
         assertThat(captureRecordedEntry().getAction(), is(AuditAction.UPDATE));
     }
 
+    @Test
+    void treat_delete_as_delete_for_generic_resources() {
+        when(resourceInfo.getResourceClass()).thenReturn((Class) NamespaceResource.class);
+        MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
+        pathParams.putSingle("namespace", "finos");
+        ContainerRequestContext requestContext = mockRequest("DELETE", pathParams);
+        ContainerResponseContext responseContext = mockResponse(204, null);
+
+        filter.filter(requestContext, responseContext);
+
+        AuditLogEntry entry = captureRecordedEntry();
+        assertThat(entry.getEntityType(), is(AuditEntityType.NAMESPACE));
+        assertThat(entry.getAction(), is(AuditAction.DELETE));
+        assertThat(entry.getNamespace(), is("finos"));
+        assertThat(entry.getOutcome(), is(AuditOutcome.SUCCESS));
+    }
+
     // --- Location-header fallback for server-generated IDs --------------------
 
     @Test

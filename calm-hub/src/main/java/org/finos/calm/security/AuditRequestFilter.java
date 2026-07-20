@@ -300,6 +300,8 @@ public class AuditRequestFilter implements ContainerResponseFilter {
             action = "POST".equals(method) ? AuditAction.GRANT : AuditAction.REVOKE;
         } else if ("POST".equals(method)) {
             action = pathEntityId != null ? AuditAction.UPDATE : AuditAction.CREATE;
+        } else if ("DELETE".equals(method)) {
+            action = AuditAction.DELETE;
         } else {
             return null;
         }
