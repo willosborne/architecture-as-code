@@ -48,10 +48,10 @@ export type DetailedArchResolution =
     | { type: 'unknown' };
 
 /**
- * Narrows a resolution to the variants that navigate in-app ('internal' and
- * 'invalid' — both carry a router path; 'invalid' lands on the not-found view).
- * Consumers must use this rather than enumerating variants, so a future
- * navigable variant only needs adding here.
+ * Narrows a resolution to variants that should be handled via in-app navigation
+ * ('internal' and 'invalid' — both carry a `path` string to pass to the in-app navigation handler;
+ * 'invalid' should route to /broken-reference rather than being navigated to directly).
+ * Consumers must use this rather than enumerating variants, so a future navigable variant only needs adding here.
  */
 export function isNavigableArch(
     resolution: DetailedArchResolution,
