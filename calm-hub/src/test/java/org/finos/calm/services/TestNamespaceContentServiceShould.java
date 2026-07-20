@@ -20,6 +20,7 @@ import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -100,10 +101,10 @@ class TestNamespaceContentServiceShould {
     }
 
     @Test
-    void treat_a_runtime_failure_from_a_store_as_empty() throws Exception {
+    void propagate_a_runtime_failure_from_a_store_instead_of_treating_it_as_empty() throws Exception {
         when(mockArchitectureStore.getArchitecturesForNamespace(NAMESPACE))
                 .thenThrow(new RuntimeException("store unavailable"));
 
-        assertThat(service.hasContent(NAMESPACE), is(false));
+        assertThrows(RuntimeException.class, () -> service.hasContent(NAMESPACE));
     }
 }

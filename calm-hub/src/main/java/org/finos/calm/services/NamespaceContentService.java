@@ -11,8 +11,6 @@ import org.finos.calm.store.InterfaceStore;
 import org.finos.calm.store.PatternStore;
 import org.finos.calm.store.StandardStore;
 import org.finos.calm.store.TimelineStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -24,8 +22,6 @@ import java.util.List;
  */
 @ApplicationScoped
 public class NamespaceContentService {
-
-    private static final Logger logger = LoggerFactory.getLogger(NamespaceContentService.class);
 
     private final ArchitectureStore architectureStore;
     private final PatternStore patternStore;
@@ -73,16 +69,18 @@ public class NamespaceContentService {
     }
 
     /**
-     * Sizes a store list, treating a missing namespace as empty (mirrors
-     * {@code CountsService.sizeOrZero}) so one store's not-found never fails the whole check.
+     * Sizes a store list, treating a missing namespace as empty so one store's not-found
+     * never fails the whole check. Unlike {@code CountsService.sizeOrZero} — which backs a
+     * read-only display count, where treating a store failure as zero is a harmless
+     * undercount — this method gates an irreversible namespace deletion, so any other
+     * failure (a store timeout, a locked file, etc.) is deliberately NOT swallowed here:
+     * it propagates so the delete fails loudly instead of silently proceeding against
+     * content that was never actually confirmed absent.
      */
     private boolean isNotEmpty(NamespaceListSupplier supplier) {
         try {
             return !supplier.get().isEmpty();
         } catch (NamespaceNotFoundException e) {
-            return false;
-        } catch (RuntimeException e) {
-            logger.warn("Failed to check a resource list while checking namespace content; treating as empty", e);
             return false;
         }
     }

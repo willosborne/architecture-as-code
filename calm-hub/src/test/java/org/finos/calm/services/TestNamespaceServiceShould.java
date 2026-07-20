@@ -185,11 +185,11 @@ class TestNamespaceServiceShould {
     @Test
     void throw_namespace_not_empty_and_skip_delete_when_namespace_has_content() throws NamespaceNotFoundException {
         when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
-        when(mockNamespaceStore.getNamespaces()).thenReturn(List.of(new NamespaceInfo("finos", "desc")));
         when(mockNamespaceContentService.hasContent("finos")).thenReturn(true);
 
         assertThrows(NamespaceNotEmptyException.class, () -> service.deleteNamespace("finos"));
 
+        verify(mockNamespaceStore, never()).getNamespaces();
         verify(mockNamespaceStore, never()).deleteNamespace(any());
         verify(mockUserAccessStore, never()).deleteAllUserAccessForNamespace(any());
     }

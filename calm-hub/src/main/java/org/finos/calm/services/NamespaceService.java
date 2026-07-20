@@ -58,16 +58,25 @@ public class NamespaceService {
             throw new NamespaceNotFoundException();
         }
 
+        if (namespaceContentService.hasContent(name)) {
+            throw new NamespaceNotEmptyException(name);
+        }
+
+        // Checked last, immediately before the delete, rather than first — this shrinks the
+        // window in which a concurrent createNamespace(name + ".child", ...) could slip in
+        // between this check and the delete below, from "the whole content scan above" down
+        // to "the gap between these two store calls". It does not close that window entirely:
+        // neither store backend holds a lock/transaction spanning both calls (Nitrite's
+        // ReentrantLock only guards each individual store operation, and Mongo has no
+        // equivalent at all), so a namespace could in principle still gain a child in that
+        // narrow gap and be deleted anyway, orphaning it. Fully eliminating the race would
+        // require the store layer itself to check-and-delete atomically.
         int childNamespaceCount = (int) namespaceStore.getNamespaces().stream()
                 .map(NamespaceInfo::getName)
                 .filter(ns -> ns.startsWith(name + "."))
                 .count();
         if (childNamespaceCount > 0) {
             throw new NamespaceNotEmptyException(name, childNamespaceCount);
-        }
-
-        if (namespaceContentService.hasContent(name)) {
-            throw new NamespaceNotEmptyException(name);
         }
 
         namespaceStore.deleteNamespace(name);
