@@ -1,6 +1,8 @@
 import { readFile } from 'fs/promises';
-import { validate, CALM_META_SCHEMA_DIRECTORY, buildDocumentLoader, SchemaDirectory } from '@finos/calm-shared';
+import { validate, CALM_META_SCHEMA_DIRECTORY, buildDocumentLoader, SchemaDirectory, loadPatternFromDocumentIfPresent, initLogger } from '@finos/calm-shared';
 import { resolveFilePath } from './bundle';
+
+const logger = initLogger(false, 'workspace-post-bump-validate');
 
 export interface PostBumpValidationResult {
     id: string;
@@ -45,9 +47,19 @@ export async function runPostBumpValidation(
         }
 
         try {
-            const outcome = type === 'architecture'
-                ? await validate(content, undefined, undefined, schemaDir, false)
-                : await validate(undefined, content, undefined, schemaDir, false);
+            let outcome;
+            if (type === 'architecture') {
+                // Resolve the architecture's own pattern via its `$schema` (the same way the real
+                // `calm validate -a` path does through loadPatternFromDocumentIfPresent) and pass it
+                // as the pattern argument so validate() runs in architecture-with-pattern mode. Passing
+                // undefined here would fall back to architecture-only mode, which only runs generic
+                // CALM-core-schema/spectral checks and can never catch an architecture that has drifted
+                // out of conformance with its pattern — exactly the regression this feature exists to catch.
+                const pattern = await loadPatternFromDocumentIfPresent(content, filePath, docLoader, schemaDir, logger);
+                outcome = await validate(content, pattern, undefined, schemaDir, false);
+            } else {
+                outcome = await validate(undefined, content, undefined, schemaDir, false);
+            }
 
             const errorCount = outcome.allValidationOutputs().filter(o => o.severity === 'error').length;
             results.push({ id, filePath, type, passed: !outcome.hasErrors, errorCount });

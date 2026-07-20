@@ -4,9 +4,10 @@ import path from 'path';
 
 // vi.mock is hoisted to the top of the file by vitest, so factories must not reference
 // variables declared in the module scope. We store captured spies via vi.hoisted() instead.
-const { mockValidate, mockLoadSchemas } = vi.hoisted(() => ({
+const { mockValidate, mockLoadSchemas, mockLoadPattern } = vi.hoisted(() => ({
     mockValidate: vi.fn(),
     mockLoadSchemas: vi.fn().mockResolvedValue(undefined),
+    mockLoadPattern: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@finos/calm-shared', () => ({
@@ -15,6 +16,8 @@ vi.mock('@finos/calm-shared', () => ({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     SchemaDirectory: vi.fn().mockImplementation(function(this: any) { this.loadSchemas = mockLoadSchemas; }),
     validate: (...args: unknown[]) => mockValidate(...args),
+    loadPatternFromDocumentIfPresent: (...args: unknown[]) => mockLoadPattern(...args),
+    initLogger: vi.fn().mockReturnValue({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 import { runPostBumpValidation } from './post-bump-validate';
@@ -37,6 +40,7 @@ describe('runPostBumpValidation', () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         mockLoadSchemas.mockResolvedValue(undefined);
+        mockLoadPattern.mockResolvedValue(undefined);
         await mkdir(filesPath, { recursive: true });
     });
 
@@ -88,15 +92,46 @@ describe('runPostBumpValidation', () => {
         );
     });
 
-    it('calls validate with architecture slot for an architecture entry', async () => {
-        await write('arch.json', { $id: 'test', title: 'Arch' });
+    it('resolves the architecture pattern via $schema and validates against it', async () => {
+        // Regression guard: an architecture must be validated against its own pattern
+        // (architecture-with-pattern mode), not architecture-only, otherwise pattern drift
+        // introduced by a bump goes undetected.
+        await write('arch.json', { $id: 'test', title: 'Arch', $schema: 'https://example.com/pattern' });
+        const pattern = { $id: 'https://example.com/pattern', title: 'Pattern' };
+        mockLoadPattern.mockResolvedValue(pattern);
         mockValidate.mockResolvedValue(makeOutcome(0));
 
         await runPostBumpValidation(bundlePath, {
             'my-arch': { path: 'files/arch.json', type: 'architecture' },
         });
 
-        // validate(archContent, undefined, undefined, schemaDir, false)
+        // The pattern resolved from $schema is passed as the 2nd validate() argument.
+        expect(mockLoadPattern).toHaveBeenCalledWith(
+            expect.objectContaining({ $schema: 'https://example.com/pattern' }),
+            expect.stringContaining('arch.json'),
+            expect.anything(),
+            expect.anything(),
+            expect.anything()
+        );
+        expect(mockValidate).toHaveBeenCalledWith(
+            expect.objectContaining({ $id: 'test' }),
+            pattern,
+            undefined,
+            expect.anything(),
+            false
+        );
+    });
+
+    it('validates architecture-only when no pattern can be resolved from $schema', async () => {
+        await write('arch.json', { $id: 'test', title: 'Arch' });
+        mockLoadPattern.mockResolvedValue(undefined);
+        mockValidate.mockResolvedValue(makeOutcome(0));
+
+        await runPostBumpValidation(bundlePath, {
+            'my-arch': { path: 'files/arch.json', type: 'architecture' },
+        });
+
+        // Falls back to architecture-only (pattern arg undefined) when there is no pattern to load.
         expect(mockValidate).toHaveBeenCalledWith(
             expect.objectContaining({ $id: 'test' }),
             undefined,

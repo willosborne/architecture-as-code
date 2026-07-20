@@ -113,4 +113,19 @@ describe('Flow 3: workspace check -> bump -> push', () => {
         const result = await run(['workspace', 'check', '--calm-hub-url', SMOKE_HUB_URL]);
         expect(result.exitCode).toBe(0);
     });
+
+    // End-to-end guard that workspace validation actually resolves the document's `$schema` and
+    // validates against it (architecture-with-pattern mode). If validation regressed to
+    // architecture-only, a document that violates its schema would slip through `workspace check`.
+    test('workspace check fails and reports a validation error when a document violates its schema', async () => {
+        const a = readJson(aFile);
+        // `nodes` must be an array per the CALM core schema referenced by this doc's `$schema`;
+        // making it a string is a schema violation that only pattern/schema validation can catch.
+        a.nodes = 'not-an-array';
+        writeJson(aFile, a);
+
+        const err = await run(['workspace', 'check', '--calm-hub-url', SMOKE_HUB_URL]).catch(e => e);
+        expect(err.exitCode).toBe(1);
+        expect(err.stderr).toContain('failed validation');
+    });
 });

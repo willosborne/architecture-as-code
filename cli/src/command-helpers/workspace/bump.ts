@@ -6,7 +6,7 @@ import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/ca
 import {
     DocumentMetadata,
     extractDocumentMetadata,
-    updateDocumentMetadata,
+    constructDocumentId,
 } from '@finos/calm-shared/src/hub/document-id-utils';
 import { computeSemVerBump, sortSemVer } from '@finos/calm-shared/src/hub/semver';
 import { canonicalEqual } from '@finos/calm-shared/src/hub/canonical';
@@ -23,14 +23,18 @@ const logger: Logger = initLogger(false, 'workspace');
  * mirrors how CalmHub stores a description-less document). Workspace documents are pushed raw
  * (see push.ts) and validated locally, so injecting `description: ''` into a document that never
  * had one would fail the `architecture-has-no-empty-string-properties` spectral rule.
+ *
+ * Unlike `updateDocumentMetadata` this parses/stringifies the document exactly once and only
+ * touches `description` when it was already present, leaving description-less documents untouched.
  */
 function bumpDocumentContent(raw: string, metadata: DocumentMetadata): string {
-    const hadDescription = Object.prototype.hasOwnProperty.call(JSON.parse(raw), 'description');
-    const updated = updateDocumentMetadata(raw, metadata);
-    if (hadDescription) return updated;
-    const updatedJson = JSON.parse(updated);
-    delete updatedJson.description;
-    return JSON.stringify(updatedJson, null, 2);
+    const json = JSON.parse(raw);
+    json['$id'] = constructDocumentId(metadata);
+    json['title'] = metadata.name;
+    if (Object.prototype.hasOwnProperty.call(json, 'description')) {
+        json['description'] = metadata.description ?? '';
+    }
+    return JSON.stringify(json, null, 2);
 }
 
 export interface ChangedResource {
