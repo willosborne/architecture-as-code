@@ -49,7 +49,7 @@ describe('Flow 3: workspace check -> bump -> push', () => {
             $schema: 'https://calm.finos.org/release/1.0/meta/calm.json',
             $id: bId('1.0.0'),
             title: B_MAPPING,
-            nodes: [{ 'unique-id': 'system', 'node-type': 'system', name: 'System', '$ref': aId('1.0.0') }],
+            nodes: [{ 'unique-id': 'system', 'node-type': 'system', name: 'System', description: 'System architecture', '$ref': aId('1.0.0') }],
             relationships: [],
         });
 
@@ -98,7 +98,7 @@ describe('Flow 3: workspace check -> bump -> push', () => {
     });
 
     test('workspace bump increments A to 1.1.0 and repoints B to it (cascade)', async () => {
-        await run(['workspace', 'bump', '--calm-hub-url', SMOKE_HUB_URL]);
+        await run(['workspace', 'bump', '--minor', '--calm-hub-url', SMOKE_HUB_URL]);
         expect(readJson(aFile).$id).toBe(aId('1.1.0'));
         // B's reference to A must now point at A@1.1.0.
         expect(JSON.stringify(readJson(bFile))).toContain(aId('1.1.0'));
@@ -112,5 +112,20 @@ describe('Flow 3: workspace check -> bump -> push', () => {
         expect(await api.listVersions(NS, 'architectures', B_MAPPING)).toContain('1.1.0');
         const result = await run(['workspace', 'check', '--calm-hub-url', SMOKE_HUB_URL]);
         expect(result.exitCode).toBe(0);
+    });
+
+    // End-to-end guard that workspace validation actually resolves the document's `$schema` and
+    // validates against it (architecture-with-pattern mode). If validation regressed to
+    // architecture-only, a document that violates its schema would slip through `workspace check`.
+    test('workspace check fails and reports a validation error when a document violates its schema', async () => {
+        const a = readJson(aFile);
+        // `nodes` must be an array per the CALM core schema referenced by this doc's `$schema`;
+        // making it a string is a schema violation that only pattern/schema validation can catch.
+        a.nodes = 'not-an-array';
+        writeJson(aFile, a);
+
+        const err = await run(['workspace', 'check', '--calm-hub-url', SMOKE_HUB_URL]).catch(e => e);
+        expect(err.exitCode).toBe(1);
+        expect(err.stderr).toContain('failed validation');
     });
 });

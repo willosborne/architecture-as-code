@@ -6,7 +6,7 @@ import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/ca
 import {
     DocumentMetadata,
     extractDocumentMetadata,
-    updateDocumentMetadata,
+    constructDocumentId,
 } from '@finos/calm-shared/src/hub/document-id-utils';
 import { computeSemVerBump, sortSemVer } from '@finos/calm-shared/src/hub/semver';
 import { canonicalEqual } from '@finos/calm-shared/src/hub/canonical';
@@ -17,6 +17,26 @@ export { canonicalEqual };
 
 const logger: Logger = initLogger(false, 'workspace');
 
+/**
+ * Rewrites `$id`/`title` for a version bump without the empty-description default that
+ * `updateDocumentMetadata` applies for CalmHub push normalisation (see hub-commands.ts, where it
+ * mirrors how CalmHub stores a description-less document). Workspace documents are pushed raw
+ * (see push.ts) and validated locally, so injecting `description: ''` into a document that never
+ * had one would fail the `architecture-has-no-empty-string-properties` spectral rule.
+ *
+ * Unlike `updateDocumentMetadata` this parses/stringifies the document exactly once and only
+ * touches `description` when it was already present, leaving description-less documents untouched.
+ */
+function bumpDocumentContent(raw: string, metadata: DocumentMetadata): string {
+    const json = JSON.parse(raw);
+    json['$id'] = constructDocumentId(metadata);
+    json['title'] = metadata.name;
+    if (Object.prototype.hasOwnProperty.call(json, 'description')) {
+        json['description'] = metadata.description ?? '';
+    }
+    return JSON.stringify(json, null, 2);
+}
+
 export interface ChangedResource {
     id: string;
     filePath: string;
@@ -26,8 +46,27 @@ export interface ChangedResource {
 }
 
 export interface BumpResult {
-    bumped: Array<{ id: string; filePath: string; fromVersion: string; toVersion: string; triggeredBy?: string }>;
+    bumped: Array<{ id: string; filePath: string; fromVersion: string; toVersion: string; triggeredBy?: string; increment?: ResourceChangeType }>;
     refUpdates: RefUpdateResult[];
+}
+
+export interface BumpOptions {
+    /** Fallback increment used when no per-doc override is present. */
+    increment: ResourceChangeType;
+    /** Per-document increment for directly-changed docs (from interactive prompts). */
+    perDocIncrements?: Map<string, ResourceChangeType>;
+    /** Pre-detected changed resources — skips a second detectChangedResources call inside bumpWorkspace. */
+    preDetectedChanges?: ChangedResource[];
+    /** Called for each cascade candidate before bumping. Return the increment to apply.
+     *  When absent, the cascade default (max of triggering increments) is used silently. */
+    getCascadeIncrement?: (docId: string, triggeredBy: string, defaultIncrement: ResourceChangeType) => Promise<ResourceChangeType>;
+}
+
+/** Returns the highest-priority increment from a list (MAJOR > MINOR > PATCH). */
+export function maxIncrement(increments: ResourceChangeType[]): ResourceChangeType {
+    if (increments.includes('MAJOR')) return 'MAJOR';
+    if (increments.includes('MINOR')) return 'MINOR';
+    return 'PATCH';
 }
 
 /**
@@ -113,25 +152,30 @@ export async function detectChangedResources(
  * cascade: any document whose references were rewritten is itself dirty and gets bumped too,
  * triggering another sync pass. Repeats until the workspace reaches a stable state.
  *
+ * Supports per-document increments (for interactive prompts) and a callback for cascade docs.
  * Idempotent: once a document is bumped (its on-disk version is now ahead of CalmHub) a subsequent
  * bump leaves it untouched until the bumped version is pushed.
  */
 export async function bumpWorkspace(
     bundlePath: string,
     client: CalmHubClient,
-    options: { increment: ResourceChangeType }
+    options: BumpOptions
 ): Promise<BumpResult> {
-    const changed = await detectChangedResources(bundlePath, client);
+    const changed = options.preDetectedChanges ?? await detectChangedResources(bundlePath, client);
 
     const bumped: BumpResult['bumped'] = [];
     const bumpedIds = new Set<string>();
+    // Tracks the actual increment used for each bumped doc, so cascade passes can inherit it.
+    const appliedIncrements = new Map<string, ResourceChangeType>();
 
     for (const c of changed) {
-        const toVersion = computeSemVerBump(c.latestHubVersion, options.increment);
+        const docIncrement = options.perDocIncrements?.get(c.id) ?? options.increment;
+        const toVersion = computeSemVerBump(c.latestHubVersion, docIncrement);
         const raw = await readFile(c.filePath, 'utf8');
-        const updated = updateDocumentMetadata(raw, { ...c.metadata, version: toVersion });
+        const updated = bumpDocumentContent(raw, { ...c.metadata, version: toVersion });
         await writeFile(c.filePath, updated, 'utf8');
-        bumped.push({ id: c.id, filePath: c.filePath, fromVersion: c.currentVersion, toVersion });
+        bumped.push({ id: c.id, filePath: c.filePath, fromVersion: c.currentVersion, toVersion, increment: docIncrement });
+        appliedIncrements.set(c.id, docIncrement);
         bumpedIds.add(c.id);
         logger.info(`Bumped '${c.id}' ${c.currentVersion} -> ${toVersion}`);
     }
@@ -156,6 +200,7 @@ export async function bumpWorkspace(
 
         const thisPassBumped = new Set<string>();
         const triggerLabel = [...prevPassBumped].join(', ');
+        const cascadeDefault = maxIncrement([...prevPassBumped].map(id => appliedIncrements.get(id) ?? options.increment));
 
         for (const candidate of cascadeCandidates) {
             const entry = manifest[candidate.docId];
@@ -181,10 +226,15 @@ export async function bumpWorkspace(
                 continue;
             }
 
-            const toVersion = computeSemVerBump(metadata.version, options.increment);
-            const updated = updateDocumentMetadata(raw, { ...metadata, version: toVersion });
+            const cascadeIncrement = options.getCascadeIncrement
+                ? await options.getCascadeIncrement(candidate.docId, triggerLabel, cascadeDefault)
+                : cascadeDefault;
+
+            const toVersion = computeSemVerBump(metadata.version, cascadeIncrement);
+            const updated = bumpDocumentContent(raw, { ...metadata, version: toVersion });
             await writeFile(filePath, updated, 'utf8');
-            bumped.push({ id: candidate.docId, filePath, fromVersion: metadata.version, toVersion, triggeredBy: triggerLabel });
+            bumped.push({ id: candidate.docId, filePath, fromVersion: metadata.version, toVersion, triggeredBy: triggerLabel, increment: cascadeIncrement });
+            appliedIncrements.set(candidate.docId, cascadeIncrement);
             bumpedIds.add(candidate.docId);
             thisPassBumped.add(candidate.docId);
             logger.info(`Bumped '${candidate.docId}' ${metadata.version} -> ${toVersion} (depends on ${triggerLabel})`);
