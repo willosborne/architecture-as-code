@@ -531,6 +531,28 @@ describe('diff', () => {
                 },
             ]);
         });
+
+        it('treats controls with reordered object keys as unchanged when content is identical', () => {
+            const modified = {
+                ...testArchitectures.baseArchitecture,
+                controls: {
+                    ...testArchitectures.baseArchitecture.controls,
+                    'id-1': {
+                        requirements: testArchitectures.baseArchitecture.controls['id-1'].requirements,
+                        description: testArchitectures.baseArchitecture.controls['id-1'].description,
+                    },
+                },
+            } as CalmArchitectureSchema;
+
+            const result = diffArchitectures(testArchitectures.baseArchitecture, modified);
+
+            expect(result.controlItemsAdded).toEqual({});
+            expect(result.controlItemsRemoved).toEqual({});
+            expect(result.controlItemsModified).toEqual({});
+            expect(result.controlItemsUnchanged).toEqual({
+                'id-1': testArchitectures.baseArchitecture.controls['id-1'],
+            });
+        });
     });
 
     describe('diffArchitectures - comprehensive scenarios', () => {
