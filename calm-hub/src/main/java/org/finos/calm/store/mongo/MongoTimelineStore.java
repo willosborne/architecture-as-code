@@ -6,7 +6,6 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
@@ -19,6 +18,7 @@ import org.finos.calm.domain.timeline.CreateTimelineRequest;
 import org.finos.calm.domain.timeline.NamespaceTimelineSummary;
 import org.finos.calm.domain.timeline.Timeline;
 import org.finos.calm.store.TimelineStore;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,10 +95,9 @@ public class MongoTimelineStore implements TimelineStore {
                 .append("versions",
                         new Document("1-0-0", Document.parse(timelineRequest.getTimelineJson())));
 
-        timelineCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(timelineCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("timelines", timelineDocument),
-                new UpdateOptions().upsert(true));
+                "timelines", timelineDocument);
 
         return new Timeline.TimelineBuilder()
                 .setId(id)

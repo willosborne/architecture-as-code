@@ -8,8 +8,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
@@ -20,6 +18,7 @@ import org.finos.calm.domain.adr.NamespaceAdrSummary;
 import org.finos.calm.domain.adr.Status;
 import org.finos.calm.domain.exception.*;
 import org.finos.calm.store.AdrStore;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +28,22 @@ import java.util.Optional;
 import java.util.Set;
 import io.quarkus.arc.lookup.LookupIfProperty;
 
+/**
+ * MongoDB-backed implementation of {@link AdrStore}.
+ *
+ * <h2>Document model &amp; concurrency</h2>
+ * Follows the same namespace-scoped document pattern as {@link MongoArchitectureStore}:
+ * one document per namespace (enforced by a unique index on {@code adrs.namespace}), with
+ * an array of ADR sub-documents each holding a {@code revisions} map (revision number → JSON).
+ * New ADRs are added via upsert + {@code $push}. New revisions use an atomic conditional
+ * update with {@code $elemMatch} / {@code $exists: false} on the target revision key: if a
+ * concurrent writer already wrote that revision, {@code matchedCount == 0} signals the
+ * conflict and {@link org.finos.calm.domain.exception.AdrRevisionExistsException} is thrown
+ * instead of silently overwriting the other writer's revision.
+ *
+ * @see MongoIndexInitializer
+ * @see MongoCounterStore
+ */
 @LookupIfProperty(name = "calm.database.mode", stringValue = "mongo", lookupIfMissing = true)
 @ApplicationScoped
 @Typed(MongoAdrStore.class)
@@ -109,10 +124,9 @@ public class MongoAdrStore implements AdrStore {
         Document adrDocument = new Document("adrId", id).append("revisions",
                 new Document(String.valueOf(adrMeta.getRevision()), Document.parse(adrStr)));
 
-        adrCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(adrCollection,
                 Filters.eq("namespace", adrMeta.getNamespace()),
-                Updates.push("adrs", adrDocument),
-                new UpdateOptions().upsert(true));
+                "adrs", adrDocument);
 
         return new AdrMeta.AdrMetaBuilder(adrMeta).setId(id).build();
     }
@@ -155,7 +169,7 @@ public class MongoAdrStore implements AdrStore {
     }
 
     @Override
-    public AdrMeta updateAdrForNamespace(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
+    public AdrMeta updateAdrForNamespace(AdrMeta adrMeta) throws NamespaceNotFoundException, AdrNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException, AdrRevisionExistsException {
         Document adrDoc = retrieveAdrDoc(adrMeta);
         AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
 
@@ -173,7 +187,7 @@ public class MongoAdrStore implements AdrStore {
     }
 
     @Override
-    public AdrMeta updateAdrStatus(AdrMeta adrMeta, Status status) throws AdrNotFoundException, NamespaceNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException {
+    public AdrMeta updateAdrStatus(AdrMeta adrMeta, Status status) throws AdrNotFoundException, NamespaceNotFoundException, AdrRevisionNotFoundException, AdrPersistenceException, AdrParseException, AdrRevisionExistsException {
         Document adrDoc = retrieveAdrDoc(adrMeta);
         AdrMeta latestRevision = retrieveLatestRevision(adrMeta, adrDoc);
 
@@ -248,17 +262,25 @@ public class MongoAdrStore implements AdrStore {
         }
     }
 
-    private void writeAdrToMongo(AdrMeta adrMeta) throws AdrPersistenceException, AdrParseException {
+    private void writeAdrToMongo(AdrMeta adrMeta) throws AdrPersistenceException, AdrParseException, AdrRevisionExistsException {
 
         try {
             Document adrDocument = Document.parse(objectMapper.writeValueAsString(adrMeta.getAdr()));
+
+            // Atomic conditional update: only succeeds if this revision doesn't already exist.
+            // Two concurrent writers both computing the same "latest + 1" revision will race here;
+            // the loser gets matchedCount == 0 instead of silently overwriting the winner's write.
             Document filter = new Document("namespace", adrMeta.getNamespace())
-                    .append("adrs.adrId", adrMeta.getId());
+                    .append("adrs", new Document("$elemMatch",
+                            new Document("adrId", adrMeta.getId())
+                                    .append("revisions." + adrMeta.getRevision(), new Document("$exists", false))));
+
             Document update = new Document("$set",
                     new Document("adrs.$.revisions." + adrMeta.getRevision(), adrDocument));
 
-            adrCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
-
+            if (adrCollection.updateOne(filter, update).getMatchedCount() == 0) {
+                throw new AdrRevisionExistsException();
+            }
         } catch(MongoWriteException ex) {
             log.error("Failed to write ADR to mongo [{}]", adrMeta, ex);
             throw new AdrPersistenceException();

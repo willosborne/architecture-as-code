@@ -232,6 +232,32 @@ public class TestMongoFlowStoreShould {
     }
 
     @Test
+    void retry_and_succeed_when_a_concurrent_request_wins_the_first_create_race() throws NamespaceNotFoundException {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextFlowSequenceValue()).thenReturn(42);
+        when(flowCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(11000, "duplicate key", new BsonDocument()), new ServerAddress(), List.of()))
+                .thenReturn(null);
+        CreateFlowRequest request = new CreateFlowRequest("Test Flow", "A test", validJson);
+
+        mongoFlowStore.createFlowForNamespace(request, NAMESPACE);
+
+        verify(flowCollection, times(2)).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+    }
+
+    @Test
+    void propagate_non_duplicate_key_errors_when_creating_a_flow() {
+        when(namespaceStore.namespaceExists(anyString())).thenReturn(true);
+        when(counterStore.getNextFlowSequenceValue()).thenReturn(42);
+        when(flowCollection.updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class)))
+                .thenThrow(new MongoWriteException(new WriteError(12, "some other error", new BsonDocument()), new ServerAddress(), List.of()));
+        CreateFlowRequest request = new CreateFlowRequest("Test Flow", "A test", validJson);
+
+        assertThrows(MongoWriteException.class,
+                () -> mongoFlowStore.createFlowForNamespace(request, NAMESPACE));
+    }
+
+    @Test
     void get_flow_version_for_invalid_namespace_throws_exception() {
         when(namespaceStore.namespaceExists(anyString())).thenReturn(false);
         Flow flow = new Flow.FlowBuilder().setNamespace("does-not-exist").build();

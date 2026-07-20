@@ -3,7 +3,6 @@ package org.finos.calm.store.mongo;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
@@ -13,6 +12,7 @@ import org.finos.calm.domain.Decorator;
 import org.finos.calm.domain.exception.DecoratorNotFoundException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.store.DecoratorStore;
+import org.finos.calm.store.util.MongoUpsertPush;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -119,10 +119,9 @@ public class MongoDecoratorStore implements DecoratorStore {
         Document decoratorDocument = new Document("decoratorId", id)
                 .append("decorator", parsedDecorator);
 
-        decoratorCollection.updateOne(
+        MongoUpsertPush.pushWithDuplicateRetry(decoratorCollection,
                 Filters.eq("namespace", namespace),
-                Updates.push("decorators", decoratorDocument),
-                new UpdateOptions().upsert(true));
+                "decorators", decoratorDocument);
 
         LOG.debug("Created decorator with ID {} in namespace '{}'", id, namespace);
         return id;

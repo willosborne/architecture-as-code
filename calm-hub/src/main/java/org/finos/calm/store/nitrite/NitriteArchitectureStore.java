@@ -25,8 +25,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.dizitart.no2.filters.FluentFilter.where;
 import io.quarkus.arc.lookup.LookupIfProperty;
@@ -52,7 +52,7 @@ public class NitriteArchitectureStore implements ArchitectureStore {
     private final NitriteCollection architectureCollection;
     private final NitriteNamespaceStore namespaceStore;
     private final NitriteCounterStore counterStore;
-    private final Lock lock = new ReentrantLock();
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
     @Inject
     public NitriteArchitectureStore(@StandaloneQualifier Nitrite db, NitriteNamespaceStore namespaceStore, NitriteCounterStore counterStore) {
@@ -69,32 +69,37 @@ public class NitriteArchitectureStore implements ArchitectureStore {
             throw new NamespaceNotFoundException();
         }
 
-        TypeSafeNitriteDocument<Document> namespaceDocument = new TypeSafeNitriteDocument<>(architectureCollection.find(where(NAMESPACE_FIELD).eq(namespace)).firstOrNull(), Document.class);
-        List<Document> architectures = namespaceDocument.getList(ARCHITECTURES_FIELD);
-        if (architectures == null || architectures.isEmpty()) {
-            return List.of();
-        }
+        lock.readLock().lock();
+        try {
+            TypeSafeNitriteDocument<Document> namespaceDocument = new TypeSafeNitriteDocument<>(architectureCollection.find(where(NAMESPACE_FIELD).eq(namespace)).firstOrNull(), Document.class);
+            List<Document> architectures = namespaceDocument.getList(ARCHITECTURES_FIELD);
+            if (architectures == null || architectures.isEmpty()) {
+                return List.of();
+            }
 
-        List<NamespaceResourceSummary> architectureSummaries = new ArrayList<>();
-        for (Document architecture : architectures) {
-            Integer archId = architecture.get(ARCHITECTURE_ID_FIELD, Integer.class);
-            String name = architecture.get(NAME_FIELD, String.class);
-            String description = architecture.get(DESCRIPTION_FIELD, String.class);
-            if (name == null) name = "Architecture " + archId;
-            if (description == null) description = "";
-            // Count versions from the already-in-memory sub-document (O(1), no extra query).
-            Object rawVersions = architecture.get(VERSIONS_FIELD);
-            int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
-            NamespaceResourceSummary summary = new NamespaceResourceSummary(
-                    name, description, archId, versionCount
-            );
-            architectureSummaries.add(summary);
-        }
+            List<NamespaceResourceSummary> architectureSummaries = new ArrayList<>();
+            for (Document architecture : architectures) {
+                Integer archId = architecture.get(ARCHITECTURE_ID_FIELD, Integer.class);
+                String name = architecture.get(NAME_FIELD, String.class);
+                String description = architecture.get(DESCRIPTION_FIELD, String.class);
+                if (name == null) name = "Architecture " + archId;
+                if (description == null) description = "";
+                // Count versions from the already-in-memory sub-document (O(1), no extra query).
+                Object rawVersions = architecture.get(VERSIONS_FIELD);
+                int versionCount = VersionKeySelector.versionCount(rawVersions instanceof Document d ? d.getFields() : null);
+                NamespaceResourceSummary summary = new NamespaceResourceSummary(
+                        name, description, archId, versionCount
+                );
+                architectureSummaries.add(summary);
+            }
 
-        // Nitrite has no array-slice projection, so apply the limit/offset window in memory.
-        List<NamespaceResourceSummary> pageResults = page.apply(architectureSummaries);
-        LOG.debug("Retrieved {} of {} architectures for namespace '{}'", pageResults.size(), architectureSummaries.size(), namespace);
-        return pageResults;
+            // Nitrite has no array-slice projection, so apply the limit/offset window in memory.
+            List<NamespaceResourceSummary> pageResults = page.apply(architectureSummaries);
+            LOG.debug("Retrieved {} of {} architectures for namespace '{}'", pageResults.size(), architectureSummaries.size(), namespace);
+            return pageResults;
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -106,7 +111,7 @@ public class NitriteArchitectureStore implements ArchitectureStore {
 
         validateArchitectureJson(architecture.getArchitectureJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             int id = counterStore.getNextArchitectureSequenceValue();
             // Store the architecture JSON as a string
@@ -149,37 +154,42 @@ public class NitriteArchitectureStore implements ArchitectureStore {
                     .setArchitecture(architecture.getArchitectureJson())
                     .build();
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
     }
 
     @Override
     public List<String> getArchitectureVersions(Architecture architecture) throws NamespaceNotFoundException, ArchitectureNotFoundException {
-        Document result = retrieveArchitectureVersions(architecture);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveArchitectureVersions(architecture);
 
-        List<Document> architectures = new TypeSafeNitriteDocument<>(result, Document.class).getList(ARCHITECTURES_FIELD);
-        for (Document architectureDoc : architectures) {
-            if (architecture.getId() == architectureDoc.get(ARCHITECTURE_ID_FIELD, Integer.class)) {
-                // Extract the versions map from the matching architecture
-                Document versions = architectureDoc.get(VERSIONS_FIELD, Document.class);
-                if (versions == null) {
-                    throw new ArchitectureNotFoundException();
-                }
-                Set<String> versionKeys = versions.getFields();
+            List<Document> architectures = new TypeSafeNitriteDocument<>(result, Document.class).getList(ARCHITECTURES_FIELD);
+            for (Document architectureDoc : architectures) {
+                if (architecture.getId() == architectureDoc.get(ARCHITECTURE_ID_FIELD, Integer.class)) {
+                    // Extract the versions map from the matching architecture
+                    Document versions = architectureDoc.get(VERSIONS_FIELD, Document.class);
+                    if (versions == null) {
+                        throw new ArchitectureNotFoundException();
+                    }
+                    Set<String> versionKeys = versions.getFields();
 
-                // Convert from Nitrite representation
-                List<String> resourceVersions = new ArrayList<>();
-                for (String versionKey : versionKeys) {
-                    resourceVersions.add(versionKey.replace('-', '.'));
+                    // Convert from Nitrite representation
+                    List<String> resourceVersions = new ArrayList<>();
+                    for (String versionKey : versionKeys) {
+                        resourceVersions.add(versionKey.replace('-', '.'));
+                    }
+                    LOG.debug("Retrieved {} versions for architecture {} in namespace '{}'",
+                            resourceVersions.size(), architecture.getId(), architecture.getNamespace());
+                    return resourceVersions;
                 }
-                LOG.debug("Retrieved {} versions for architecture {} in namespace '{}'",
-                        resourceVersions.size(), architecture.getId(), architecture.getNamespace());
-                return resourceVersions;
             }
-        }
 
-        LOG.warn("Architecture with ID {} not found in namespace '{}'", architecture.getId(), architecture.getNamespace());
-        throw new ArchitectureNotFoundException();
+            LOG.warn("Architecture with ID {} not found in namespace '{}'", architecture.getId(), architecture.getNamespace());
+            throw new ArchitectureNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     private Document retrieveArchitectureVersions(Architecture architecture) throws NamespaceNotFoundException, ArchitectureNotFoundException {
@@ -201,35 +211,40 @@ public class NitriteArchitectureStore implements ArchitectureStore {
 
     @Override
     public String getArchitectureForVersion(Architecture architecture) throws NamespaceNotFoundException, ArchitectureNotFoundException, ArchitectureVersionNotFoundException {
-        Document result = retrieveArchitectureVersions(architecture);
+        lock.readLock().lock();
+        try {
+            Document result = retrieveArchitectureVersions(architecture);
 
-        List<Document> architectures = new TypeSafeNitriteDocument<>(result, Document.class).getList(ARCHITECTURES_FIELD);
-        for (Document architectureDoc : architectures) {
-            if (architecture.getId() == architectureDoc.get(ARCHITECTURE_ID_FIELD, Integer.class)) {
-                // Retrieve the versions map from the matching architecture
-                Document versions = architectureDoc.get(VERSIONS_FIELD, Document.class);
-                if (versions == null) {
-                    throw new ArchitectureVersionNotFoundException();
+            List<Document> architectures = new TypeSafeNitriteDocument<>(result, Document.class).getList(ARCHITECTURES_FIELD);
+            for (Document architectureDoc : architectures) {
+                if (architecture.getId() == architectureDoc.get(ARCHITECTURE_ID_FIELD, Integer.class)) {
+                    // Retrieve the versions map from the matching architecture
+                    Document versions = architectureDoc.get(VERSIONS_FIELD, Document.class);
+                    if (versions == null) {
+                        throw new ArchitectureVersionNotFoundException();
+                    }
+
+                    // Return the architecture JSON blob for the specified version
+                    String mongoVersion = architecture.getMongoVersion();
+                    Object versionObj = versions.get(mongoVersion);
+                    LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
+
+                    if (!(versionObj instanceof String)) {
+                        LOG.warn("Version '{}' not found for architecture {} in namespace '{}'",
+                                architecture.getDotVersion(), architecture.getId(), architecture.getNamespace());
+                        throw new ArchitectureVersionNotFoundException();
+                    }
+
+                    return (String) versionObj;
                 }
-
-                // Return the architecture JSON blob for the specified version
-                String mongoVersion = architecture.getMongoVersion();
-                Object versionObj = versions.get(mongoVersion);
-                LOG.info("VersionDoc: [{}], Mongo Version: [{}]", versions, mongoVersion);
-
-                if (!(versionObj instanceof String)) {
-                    LOG.warn("Version '{}' not found for architecture {} in namespace '{}'",
-                            architecture.getDotVersion(), architecture.getId(), architecture.getNamespace());
-                    throw new ArchitectureVersionNotFoundException();
-                }
-
-                return (String) versionObj;
             }
-        }
 
-        // Architectures is empty, no version to find
-        LOG.warn("Architecture with ID {} not found in namespace '{}'", architecture.getId(), architecture.getNamespace());
-        throw new ArchitectureVersionNotFoundException();
+            // Architectures is empty, no version to find
+            LOG.warn("Architecture with ID {} not found in namespace '{}'", architecture.getId(), architecture.getNamespace());
+            throw new ArchitectureVersionNotFoundException();
+        } finally {
+            lock.readLock().unlock();
+        }
     }
 
     @Override
@@ -241,7 +256,7 @@ public class NitriteArchitectureStore implements ArchitectureStore {
 
         validateArchitectureJson(architecture.getArchitectureJson());
 
-        lock.lock();
+        lock.writeLock().lock();
         try {
             if (versionExists(architecture)) {
                 LOG.warn("Version '{}' already exists for architecture {} in namespace '{}'",
@@ -251,7 +266,7 @@ public class NitriteArchitectureStore implements ArchitectureStore {
 
             writeArchitectureToNitrite(architecture);
         } finally {
-            lock.unlock();
+            lock.writeLock().unlock();
         }
         return architecture;
     }
@@ -265,7 +280,12 @@ public class NitriteArchitectureStore implements ArchitectureStore {
 
         validateArchitectureJson(architecture.getArchitectureJson());
 
-        writeArchitectureToNitrite(architecture);
+        lock.writeLock().lock();
+        try {
+            writeArchitectureToNitrite(architecture);
+        } finally {
+            lock.writeLock().unlock();
+        }
         return architecture;
     }
 

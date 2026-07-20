@@ -260,6 +260,9 @@ public class AdrTools {
         } catch (AdrParseException e) {
             logger.warn("ADR parse error for ADR [{}] in namespace [{}]", adrId, namespace, e);
             return ToolResponse.error("Error: Failed to parse ADR content. Check the JSON structure.");
+        } catch (AdrRevisionExistsException e) {
+            logger.warn("Concurrent update created a conflicting revision for ADR [{}] in namespace [{}]", adrId, namespace, e);
+            return ToolResponse.error("Error: ADR " + adrId + " was concurrently updated, please retry.");
         } catch (Exception e) {
             logger.error("Unexpected error updating ADR [{}] in namespace [{}]", adrId, namespace, e);
             return ToolResponse.error("Error: Unexpected error updating ADR " + adrId + ".");
@@ -307,6 +310,9 @@ public class AdrTools {
         } catch (AdrParseException e) {
             logger.warn("Parse error updating status for ADR [{}] in namespace [{}]", adrId, namespace, e);
             return ToolResponse.error("Error: Failed to parse ADR " + adrId + " when updating status.");
+        } catch (AdrRevisionExistsException e) {
+            logger.warn("Concurrent update created a conflicting revision for ADR [{}] in namespace [{}]", adrId, namespace, e);
+            return ToolResponse.error("Error: ADR " + adrId + " was concurrently updated, please retry.");
         }
     }
 }

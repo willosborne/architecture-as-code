@@ -34,6 +34,15 @@ describe('CountsService', () => {
             expect(result).toEqual(expected);
         });
 
+        it('returns namespace counts sorted alphabetically by namespace regardless of API response order', async () => {
+            const zebra = { ...expected[0], namespace: 'zebra' };
+            const apple = { ...expected[0], namespace: 'apple' };
+            mock.onGet('/api/calm/namespaces/counts').reply(200, { values: [zebra, apple] });
+
+            const result = await service.fetchNamespaceCounts();
+            expect(result.map((r) => r.namespace)).toEqual(['apple', 'zebra']);
+        });
+
         it('returns an empty array when values is missing', async () => {
             mock.onGet('/api/calm/namespaces/counts').reply(200, {});
 
