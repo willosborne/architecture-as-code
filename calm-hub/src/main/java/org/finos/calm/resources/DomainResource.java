@@ -135,7 +135,7 @@ public class DomainResource {
         } catch (DomainNotFoundException e) {
             return invalidDomainResponse(domain);
         } catch (DomainNotEmptyException e) {
-            return domainNotEmptyResponse(domain);
+            return domainNotEmptyResponse(e.getDomain());
         }
         return Response.noContent().build();
     }

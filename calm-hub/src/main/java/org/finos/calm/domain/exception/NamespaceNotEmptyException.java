@@ -3,9 +3,10 @@ package org.finos.calm.domain.exception;
 /**
  * Thrown when a namespace cannot be deleted because it still has content or child
  * namespaces. Carries the raw namespace name and (if applicable) a child-namespace
- * count as separate fields rather than a single pre-formatted message, so the resource
- * layer can sanitize the user-derived namespace name and compose the response body
- * around it. Only a count is carried for children — not their names — since a
+ * count as separate fields rather than a formatted message — the resource layer
+ * (see {@code CalmResourceErrorResponses.namespaceNotEmptyResponse}) is solely
+ * responsible for composing and sanitizing the user-facing message, so it isn't
+ * duplicated here. Only a count is carried for children — not their names — since a
  * namespace can have arbitrarily many children and enumerating them all would make
  * the error response unbounded in size.
  */
@@ -18,8 +19,7 @@ public class NamespaceNotEmptyException extends Exception {
      * @param childNamespaceCount the number of child namespaces blocking deletion (greater than 0)
      */
     public NamespaceNotEmptyException(String namespace, int childNamespaceCount) {
-        super("Namespace " + namespace + " has " + childNamespaceCount
-                + " child namespace(s) and cannot be deleted");
+        super("Namespace not empty: " + namespace);
         this.namespace = namespace;
         this.childNamespaceCount = childNamespaceCount;
     }
@@ -28,9 +28,7 @@ public class NamespaceNotEmptyException extends Exception {
      * @param namespace the namespace that could not be deleted because it still has content
      */
     public NamespaceNotEmptyException(String namespace) {
-        super("Namespace " + namespace + " contains resources and cannot be deleted");
-        this.namespace = namespace;
-        this.childNamespaceCount = 0;
+        this(namespace, 0);
     }
 
     public String getNamespace() {

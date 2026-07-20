@@ -116,7 +116,8 @@ class TestDomainServiceShould {
         when(mockControlStore.getControlsForDomain("retail"))
                 .thenReturn(List.of(new ControlDetail(1, "control", "description")));
 
-        assertThrows(DomainNotEmptyException.class, () -> service.deleteDomain("retail"));
+        DomainNotEmptyException ex = assertThrows(DomainNotEmptyException.class, () -> service.deleteDomain("retail"));
+        assertThat(ex.getDomain(), is("retail"));
 
         verify(mockDomainStore, never()).deleteDomain(any());
         verify(mockUserAccessStore, never()).deleteAllUserAccessForDomain(any());

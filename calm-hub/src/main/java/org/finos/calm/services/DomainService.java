@@ -45,7 +45,7 @@ public class DomainService {
         }
 
         if (!controlStore.getControlsForDomain(name).isEmpty()) {
-            throw new DomainNotEmptyException("Domain '" + name + "' contains controls and cannot be deleted");
+            throw new DomainNotEmptyException(name);
         }
 
         domainStore.deleteDomain(name);

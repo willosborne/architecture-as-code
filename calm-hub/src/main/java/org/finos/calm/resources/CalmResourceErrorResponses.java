@@ -50,12 +50,13 @@ public class CalmResourceErrorResponses {
 
     /**
      * Returns a 409 response for a domain-deletion attempt that was refused because the
-     * domain still has controls associated with it.
+     * domain still has controls associated with it. Formatted to match
+     * {@link #namespaceNotEmptyResponse(String, int)} — no quotes around the entity name.
      */
     public static Response domainNotEmptyResponse(String domain) {
+        String sanitizedDomain = ResourceValidationConstants.STRICT_SANITIZATION_POLICY.sanitize(domain);
         return Response.status(Response.Status.CONFLICT)
-                .entity("Domain '" + ResourceValidationConstants.STRICT_SANITIZATION_POLICY.sanitize(domain)
-                        + "' contains controls and cannot be deleted")
+                .entity("Domain " + sanitizedDomain + " contains controls and cannot be deleted")
                 .build();
     }
 }

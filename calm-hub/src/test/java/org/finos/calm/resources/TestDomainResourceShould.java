@@ -185,7 +185,7 @@ public class TestDomainResourceShould {
 
     @Test
     void return_409_when_deleting_a_domain_that_is_not_empty() throws Exception {
-        doThrow(new DomainNotEmptyException("Domain '" + TEST_DOMAIN + "' contains controls and cannot be deleted"))
+        doThrow(new DomainNotEmptyException(TEST_DOMAIN))
                 .when(mockDomainService).deleteDomain(TEST_DOMAIN);
 
         given()
