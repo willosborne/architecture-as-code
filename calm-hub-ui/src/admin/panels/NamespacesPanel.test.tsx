@@ -205,6 +205,30 @@ describe('NamespacesPanel', () => {
             );
             expect(svc.fetchNamespaceDetails).toHaveBeenCalledTimes(2);
         });
+
+        it('shows the freshly-saved description, never the stale pre-edit value, once saving settles', async () => {
+            const svc = mockService([{ name: 'finos', description: 'old desc' }]);
+            vi.spyOn(svc, 'fetchNamespaceDetails')
+                .mockResolvedValueOnce([{ name: 'finos', description: 'old desc' }])
+                .mockResolvedValueOnce([{ name: 'finos', description: 'new desc' }]);
+
+            renderPanel(svc);
+            await screen.findByText('finos');
+
+            fireEvent.click(screen.getByRole('button', { name: /edit description for finos/i }));
+            fireEvent.change(screen.getByLabelText('Description for finos'), {
+                target: { value: 'new desc' },
+            });
+            fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+            // handleSaveDescription awaits the refetch before NamespaceRow exits edit mode,
+            // so by the time editing mode is gone, the row must already show the fresh value.
+            await waitFor(() =>
+                expect(screen.queryByLabelText('Description for finos')).not.toBeInTheDocument()
+            );
+            expect(screen.getByText('new desc')).toBeInTheDocument();
+            expect(screen.queryByText('old desc')).not.toBeInTheDocument();
+        });
     });
 
     describe('deleting a namespace', () => {

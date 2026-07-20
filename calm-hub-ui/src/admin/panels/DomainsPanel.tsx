@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalmService } from '../../service/calm-service.js';
 import { DomainRow } from '../components/domains/DomainRow.js';
+import { ConfirmDeleteDialog } from '../components/ConfirmDeleteDialog.js';
+import { useDeleteConfirmation } from '../hooks/useDeleteConfirmation.js';
 
 interface DomainsPanelProps {
     calmService?: CalmService;
@@ -18,20 +20,25 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
-    const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-    const [deleting, setDeleting] = useState(false);
-    const [deleteError, setDeleteError] = useState<string | null>(null);
-
     const load = useCallback(() => {
         setLoading(true);
         setLoadError(null);
-        svc.fetchDomains()
+        return svc.fetchDomains()
             .then(setDomains)
             .catch(() => setLoadError('Failed to load domains.'))
             .finally(() => setLoading(false));
     }, [svc]);
 
     useEffect(() => { load(); }, [load]);
+
+    const {
+        pending: pendingDelete,
+        deleting,
+        error: deleteError,
+        requestDelete: handleRequestDelete,
+        cancelDelete: handleCancelDelete,
+        confirmDelete: handleConfirmDelete,
+    } = useDeleteConfirmation((domainName) => svc.deleteDomain(domainName), load, 'Failed to delete domain.');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -42,36 +49,11 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
             await svc.createDomain(name.trim());
             setSuccess(`Domain '${name.trim()}' created.`);
             setName('');
-            load();
+            await load();
         } catch (err) {
             setSubmitError(err instanceof Error ? err.message : 'Failed to create domain.');
         } finally {
             setSubmitting(false);
-        }
-    }
-
-    function handleRequestDelete(domainName: string) {
-        setDeleteError(null);
-        setPendingDelete(domainName);
-    }
-
-    function handleCancelDelete() {
-        setPendingDelete(null);
-        setDeleteError(null);
-    }
-
-    async function handleConfirmDelete() {
-        if (!pendingDelete) return;
-        setDeleting(true);
-        setDeleteError(null);
-        try {
-            await svc.deleteDomain(pendingDelete);
-            setPendingDelete(null);
-            load();
-        } catch (err) {
-            setDeleteError(err instanceof Error ? err.message : 'Failed to delete domain.');
-        } finally {
-            setDeleting(false);
         }
     }
 
@@ -130,37 +112,19 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
                 )}
             </section>
 
-            {pendingDelete && (
-                <dialog open className="modal modal-open">
-                    <div className="modal-box">
-                        <h3 className="font-bold text-lg">Confirm delete</h3>
-                        <p className="py-4">
-                            Delete domain <span className="font-mono font-semibold">{pendingDelete}</span>?
-                            This also removes all user-access grants for it. This cannot be undone.
-                        </p>
-                        {deleteError && <p className="text-error text-sm mb-2" role="alert">{deleteError}</p>}
-                        <div className="modal-action">
-                            <button
-                                className="btn btn-error"
-                                onClick={handleConfirmDelete}
-                                disabled={deleting}
-                            >
-                                {deleting ? 'Deleting…' : 'Delete'}
-                            </button>
-                            <button
-                                className="btn btn-ghost"
-                                onClick={handleCancelDelete}
-                                disabled={deleting}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                    <form method="dialog" className="modal-backdrop">
-                        <button onClick={handleCancelDelete}>close</button>
-                    </form>
-                </dialog>
-            )}
+            <ConfirmDeleteDialog
+                open={!!pendingDelete}
+                message={
+                    <>
+                        Delete domain <span className="font-mono font-semibold">{pendingDelete}</span>?
+                        This also removes all user-access grants for it. This cannot be undone.
+                    </>
+                }
+                error={deleteError}
+                deleting={deleting}
+                onConfirm={handleConfirmDelete}
+                onCancel={handleCancelDelete}
+            />
         </div>
     );
 }

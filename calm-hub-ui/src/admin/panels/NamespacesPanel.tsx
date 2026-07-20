@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalmService } from '../../service/calm-service.js';
 import { NamespaceRow } from '../components/namespaces/NamespaceRow.js';
+import { ConfirmDeleteDialog } from '../components/ConfirmDeleteDialog.js';
+import { useDeleteConfirmation } from '../hooks/useDeleteConfirmation.js';
 
 interface NamespacesPanelProps {
     calmService?: CalmService;
@@ -24,20 +26,25 @@ export function NamespacesPanel({ calmService }: NamespacesPanelProps) {
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
-    const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-    const [deleting, setDeleting] = useState(false);
-    const [deleteError, setDeleteError] = useState<string | null>(null);
-
     const load = useCallback(() => {
         setLoading(true);
         setLoadError(null);
-        svc.fetchNamespaceDetails()
+        return svc.fetchNamespaceDetails()
             .then(setNamespaces)
             .catch(() => setLoadError('Failed to load namespaces.'))
             .finally(() => setLoading(false));
     }, [svc]);
 
     useEffect(() => { load(); }, [load]);
+
+    const {
+        pending: pendingDelete,
+        deleting,
+        error: deleteError,
+        requestDelete: handleRequestDelete,
+        cancelDelete: handleCancelDelete,
+        confirmDelete: handleConfirmDelete,
+    } = useDeleteConfirmation((namespaceName) => svc.deleteNamespace(namespaceName), load, 'Failed to delete namespace.');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -49,7 +56,7 @@ export function NamespacesPanel({ calmService }: NamespacesPanelProps) {
             setSuccess(`Namespace '${name.trim()}' created.`);
             setName('');
             setDescription('');
-            load();
+            await load();
         } catch (err) {
             setSubmitError(err instanceof Error ? err.message : 'Failed to create namespace.');
         } finally {
@@ -59,32 +66,10 @@ export function NamespacesPanel({ calmService }: NamespacesPanelProps) {
 
     async function handleSaveDescription(namespaceName: string, newDescription: string) {
         await svc.updateNamespace(namespaceName, newDescription);
-        load();
-    }
-
-    function handleRequestDelete(namespaceName: string) {
-        setDeleteError(null);
-        setPendingDelete(namespaceName);
-    }
-
-    function handleCancelDelete() {
-        setPendingDelete(null);
-        setDeleteError(null);
-    }
-
-    async function handleConfirmDelete() {
-        if (!pendingDelete) return;
-        setDeleting(true);
-        setDeleteError(null);
-        try {
-            await svc.deleteNamespace(pendingDelete);
-            setPendingDelete(null);
-            load();
-        } catch (err) {
-            setDeleteError(err instanceof Error ? err.message : 'Failed to delete namespace.');
-        } finally {
-            setDeleting(false);
-        }
+        // Awaited so NamespaceRow doesn't flip back to display mode (via its own
+        // `await onSave(...)`) until the refetched description has actually landed —
+        // otherwise it would briefly render the stale pre-edit value.
+        await load();
     }
 
     return (
@@ -157,37 +142,19 @@ export function NamespacesPanel({ calmService }: NamespacesPanelProps) {
                 )}
             </section>
 
-            {pendingDelete && (
-                <dialog open className="modal modal-open">
-                    <div className="modal-box">
-                        <h3 className="font-bold text-lg">Confirm delete</h3>
-                        <p className="py-4">
-                            Delete namespace <span className="font-mono font-semibold">{pendingDelete}</span>?
-                            This also removes all user-access grants for it. This cannot be undone.
-                        </p>
-                        {deleteError && <p className="text-error text-sm mb-2" role="alert">{deleteError}</p>}
-                        <div className="modal-action">
-                            <button
-                                className="btn btn-error"
-                                onClick={handleConfirmDelete}
-                                disabled={deleting}
-                            >
-                                {deleting ? 'Deleting…' : 'Delete'}
-                            </button>
-                            <button
-                                className="btn btn-ghost"
-                                onClick={handleCancelDelete}
-                                disabled={deleting}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-                    <form method="dialog" className="modal-backdrop">
-                        <button onClick={handleCancelDelete}>close</button>
-                    </form>
-                </dialog>
-            )}
+            <ConfirmDeleteDialog
+                open={!!pendingDelete}
+                message={
+                    <>
+                        Delete namespace <span className="font-mono font-semibold">{pendingDelete}</span>?
+                        This also removes all user-access grants for it. This cannot be undone.
+                    </>
+                }
+                error={deleteError}
+                deleting={deleting}
+                onConfirm={handleConfirmDelete}
+                onCancel={handleCancelDelete}
+            />
         </div>
     );
 }
