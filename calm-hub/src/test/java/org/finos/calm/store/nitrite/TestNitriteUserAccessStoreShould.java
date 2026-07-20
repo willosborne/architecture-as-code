@@ -397,4 +397,50 @@ public class TestNitriteUserAccessStoreShould {
         verify(mockNamespaceStore, never()).namespaceExists("GLOBAL");
         verify(mockCollection).remove(mockDoc);
     }
+
+    @Test
+    public void deleteAllUserAccessForNamespace_removesEveryMatchingGrant() {
+        Document doc1 = mock(Document.class);
+        Document doc2 = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(List.of(doc1, doc2).iterator());
+
+        userAccessStore.deleteAllUserAccessForNamespace("finos");
+
+        verify(mockCollection).remove(doc1);
+        verify(mockCollection).remove(doc2);
+    }
+
+    @Test
+    public void deleteAllUserAccessForNamespace_removesNothingWhenNoGrantsExist() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        userAccessStore.deleteAllUserAccessForNamespace("finos");
+
+        verify(mockCollection, never()).remove(any(Document.class));
+    }
+
+    @Test
+    public void deleteAllUserAccessForDomain_removesEveryMatchingGrant() {
+        Document doc1 = mock(Document.class);
+        Document doc2 = mock(Document.class);
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(List.of(doc1, doc2).iterator());
+
+        userAccessStore.deleteAllUserAccessForDomain("payments");
+
+        verify(mockCollection).remove(doc1);
+        verify(mockCollection).remove(doc2);
+    }
+
+    @Test
+    public void deleteAllUserAccessForDomain_removesNothingWhenNoGrantsExist() {
+        when(mockCollection.find(any(Filter.class))).thenReturn(mockCursor);
+        when(mockCursor.iterator()).thenReturn(Collections.emptyIterator());
+
+        userAccessStore.deleteAllUserAccessForDomain("payments");
+
+        verify(mockCollection, never()).remove(any(Document.class));
+    }
 }

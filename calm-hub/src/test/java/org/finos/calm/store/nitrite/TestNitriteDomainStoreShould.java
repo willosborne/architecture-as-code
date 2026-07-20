@@ -7,6 +7,7 @@ import org.dizitart.no2.collection.NitriteCollection;
 import org.dizitart.no2.filters.Filter;
 import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -122,5 +123,33 @@ public class TestNitriteDomainStoreShould {
 
         // Assert
         verify(mockCollection).insert(any(Document.class));
+    }
+
+    @Test
+    public void testDeleteDomain_whenDomainExists_removesDomain() throws DomainNotFoundException {
+        // Arrange
+        Document existingDomain = Document.createDocument().put("name", TEST_DOMAIN_NAME);
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(existingDomain);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act
+        domainStore.deleteDomain(TEST_DOMAIN_NAME);
+
+        // Assert
+        verify(mockCollection).remove(existingDomain);
+    }
+
+    @Test
+    public void testDeleteDomain_whenDomainMissing_throwsException() {
+        // Arrange
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(null);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act & Assert
+        assertThrows(DomainNotFoundException.class, () -> domainStore.deleteDomain(TEST_DOMAIN_NAME));
+
+        verify(mockCollection, never()).remove(any(Document.class));
     }
 }

@@ -4,12 +4,15 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
 import com.mongodb.client.*;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.result.DeleteResult;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -94,6 +97,26 @@ public class TestMongoDomainStoreShould {
         List<String> domains = mongoDomainStore.getDomains();
 
         assertThat(domains, is(empty()));
+    }
+
+    @Test
+    void delete_domain_when_it_exists() throws DomainNotFoundException {
+        DeleteResult deleteResult = Mockito.mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(1L);
+        when(domainsCollection.deleteOne(Filters.eq("name", "security"))).thenReturn(deleteResult);
+
+        mongoDomainStore.deleteDomain("security");
+
+        verify(domainsCollection).deleteOne(Filters.eq("name", "security"));
+    }
+
+    @Test
+    void throw_exception_when_deleting_missing_domain() {
+        DeleteResult deleteResult = Mockito.mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(0L);
+        when(domainsCollection.deleteOne(Filters.eq("name", "missing"))).thenReturn(deleteResult);
+
+        assertThrows(DomainNotFoundException.class, () -> mongoDomainStore.deleteDomain("missing"));
     }
 
     private FindIterable<Document> emptyFindIterableSetup() {

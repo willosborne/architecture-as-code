@@ -5,11 +5,13 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.result.DeleteResult;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Typed;
 import org.bson.Document;
 import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.finos.calm.store.DomainStore;
 
 import java.util.ArrayList;
@@ -69,6 +71,14 @@ public class MongoDomainStore implements DomainStore {
                 throw new DomainAlreadyExistsException("Domain already exists: " + name);
             }
             throw e;
+        }
+    }
+
+    @Override
+    public void deleteDomain(String name) throws DomainNotFoundException {
+        DeleteResult result = domainsCollection.deleteOne(Filters.eq("name", name));
+        if (result.getDeletedCount() == 0) {
+            throw new DomainNotFoundException(name);
         }
     }
 }

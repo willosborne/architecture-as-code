@@ -30,4 +30,32 @@ public class CalmResourceErrorResponses {
     public static Response invalidDecoratorJsonResponse(String message) {
         return Response.status(Response.Status.BAD_REQUEST).entity("Invalid decorator JSON: " + message).build();
     }
+
+    /**
+     * Returns a 409 response for a namespace-deletion attempt that was refused because the
+     * namespace still has content or child namespaces. Only the namespace name — the
+     * user-derived value — is sanitized; the surrounding literal text is trusted and left
+     * untouched, so sanitization doesn't HTML-entity-encode ordinary punctuation in the
+     * message. Child namespaces are reported as a count rather than enumerated by name,
+     * since a namespace can have arbitrarily many children.
+     */
+    public static Response namespaceNotEmptyResponse(String namespace, int childNamespaceCount) {
+        String sanitizedNamespace = ResourceValidationConstants.STRICT_SANITIZATION_POLICY.sanitize(namespace);
+        String message = childNamespaceCount > 0
+                ? "Namespace " + sanitizedNamespace + " has " + childNamespaceCount
+                        + " child namespace(s) and cannot be deleted"
+                : "Namespace " + sanitizedNamespace + " contains resources and cannot be deleted";
+        return Response.status(Response.Status.CONFLICT).entity(message).build();
+    }
+
+    /**
+     * Returns a 409 response for a domain-deletion attempt that was refused because the
+     * domain still has controls associated with it.
+     */
+    public static Response domainNotEmptyResponse(String domain) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity("Domain '" + ResourceValidationConstants.STRICT_SANITIZATION_POLICY.sanitize(domain)
+                        + "' contains controls and cannot be deleted")
+                .build();
+    }
 }

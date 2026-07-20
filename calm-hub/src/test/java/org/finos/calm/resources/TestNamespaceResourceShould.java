@@ -4,6 +4,8 @@ import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.security.TestSecurity;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
+import org.finos.calm.domain.exception.NamespaceNotEmptyException;
+import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.exception.NamespaceParentNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceCounts;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
@@ -22,6 +24,7 @@ import static io.restassured.RestAssured.given;
 import static org.finos.calm.resources.ResourceValidationConstants.NAMESPACE_MESSAGE;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -348,5 +351,122 @@ public class TestNamespaceResourceShould {
                 .body(containsString("Insufficient permissions"));
 
         verify(namespaceService, never()).createNamespace(any(), any());
+    }
+
+    @Test
+    void update_namespace_description_successfully() throws Exception {
+        given()
+                .contentType("application/json")
+                .body("{\"description\":\"updated description\"}")
+                .when()
+                .put("/api/calm/namespaces/finos")
+                .then()
+                .statusCode(204);
+
+        verify(namespaceService).updateNamespaceDescription("finos", "updated description");
+    }
+
+    @Test
+    void return_404_when_updating_description_of_missing_namespace() throws Exception {
+        doThrow(new NamespaceNotFoundException())
+                .when(namespaceService).updateNamespaceDescription("missing", "desc");
+
+        given()
+                .contentType("application/json")
+                .body("{\"description\":\"desc\"}")
+                .when()
+                .put("/api/calm/namespaces/missing")
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
+    void return_400_when_updating_namespace_with_blank_description() throws Exception {
+        given()
+                .contentType("application/json")
+                .body("{\"description\":\"\"}")
+                .when()
+                .put("/api/calm/namespaces/finos")
+                .then()
+                .statusCode(400)
+                .body(containsString("Description must not be blank"));
+
+        verify(namespaceService, never()).updateNamespaceDescription(any(), any());
+    }
+
+    @Test
+    void return_400_when_updating_namespace_with_invalid_format() throws Exception {
+        given()
+                .contentType("application/json")
+                .body("{\"description\":\"desc\"}")
+                .when()
+                .put("/api/calm/namespaces/fin_os")
+                .then()
+                .statusCode(400)
+                .body(containsString(NAMESPACE_MESSAGE));
+
+        verify(namespaceService, never()).updateNamespaceDescription(any(), any());
+    }
+
+    @Test
+    void delete_namespace_successfully() throws Exception {
+        given()
+                .when()
+                .delete("/api/calm/namespaces/finos")
+                .then()
+                .statusCode(204);
+
+        verify(namespaceService).deleteNamespace("finos");
+    }
+
+    @Test
+    void return_404_when_deleting_missing_namespace() throws Exception {
+        doThrow(new NamespaceNotFoundException())
+                .when(namespaceService).deleteNamespace("missing");
+
+        given()
+                .when()
+                .delete("/api/calm/namespaces/missing")
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
+    void return_409_when_deleting_a_namespace_that_is_not_empty() throws Exception {
+        doThrow(new NamespaceNotEmptyException("finos"))
+                .when(namespaceService).deleteNamespace("finos");
+
+        given()
+                .when()
+                .delete("/api/calm/namespaces/finos")
+                .then()
+                .statusCode(409)
+                .body(containsString("contains resources"));
+    }
+
+    @Test
+    void return_409_with_child_count_when_deleting_a_namespace_with_children() throws Exception {
+        doThrow(new NamespaceNotEmptyException("org", 2))
+                .when(namespaceService).deleteNamespace("org");
+
+        given()
+                .when()
+                .delete("/api/calm/namespaces/org")
+                .then()
+                .statusCode(409)
+                .body(containsString("2 child namespace(s)"))
+                .body(not(containsString("&#39;")));
+    }
+
+    @Test
+    void return_400_when_deleting_namespace_with_invalid_format() throws Exception {
+        given()
+                .when()
+                .delete("/api/calm/namespaces/fin_os")
+                .then()
+                .statusCode(400)
+                .body(containsString(NAMESPACE_MESSAGE));
+
+        verify(namespaceService, never()).deleteNamespace(any());
     }
 }

@@ -92,6 +92,14 @@ public interface UserAccessStore {
     void deleteUserAccessForNamespace(String namespace, Integer userAccessId) throws NamespaceNotFoundException, UserAccessNotFoundException;
 
     /**
+     * Deletes every UserAccess grant scoped to a namespace, e.g. as part of deleting the
+     * namespace itself. Idempotent — deleting zero grants is not an error.
+     *
+     * @param namespace the namespace whose grants should all be removed.
+     */
+    void deleteAllUserAccessForNamespace(String namespace);
+
+    /**
      * Delete a domain-scoped UserAccess grant by domain and id.
      *
      * @param domain       the domain the grant belongs to.
@@ -99,4 +107,12 @@ public interface UserAccessStore {
      * @throws UserAccessNotFoundException if no grant exists for that id in the domain.
      */
     void deleteUserAccessForDomain(String domain, Integer userAccessId) throws UserAccessNotFoundException;
+
+    /**
+     * Deletes every UserAccess grant scoped to a domain, e.g. as part of deleting the
+     * domain itself. Idempotent — deleting zero grants is not an error.
+     *
+     * @param domain the domain whose grants should all be removed.
+     */
+    void deleteAllUserAccessForDomain(String domain);
 }

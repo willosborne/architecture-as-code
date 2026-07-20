@@ -200,6 +200,16 @@ public class MongoUserAccessStore implements UserAccessStore {
         }
     }
 
+    @Override
+    public void deleteAllUserAccessForNamespace(String namespace) {
+        userAccessCollection.deleteMany(Filters.eq("namespace", namespace));
+    }
+
+    @Override
+    public void deleteAllUserAccessForDomain(String domain) {
+        userAccessCollection.deleteMany(Filters.eq("domain", domain));
+    }
+
     private Document findExistingGrant(Bson scopeFilter, UserAccess userAccess) {
         return userAccessCollection.find(Filters.and(
                 Filters.eq("username", userAccess.getUsername()),
