@@ -67,6 +67,18 @@ describe('CalmService', () => {
             expect(actual).toEqual(expectedNamespaces);
         });
 
+        it('should return namespaces in alphabetical order regardless of API response order', async () => {
+            mock.onGet('/api/calm/namespaces').reply(200, {
+                values: [
+                    { name: 'zebra', description: '' },
+                    { name: 'apple', description: '' },
+                    { name: 'mango', description: '' },
+                ],
+            });
+            const actual = await calmService.fetchNamespaceDetails();
+            expect(actual.map((ns) => ns.name)).toEqual(['apple', 'mango', 'zebra']);
+        });
+
         it('should throw an error when backend returns error status', async () => {
             mock.onGet('/api/calm/namespaces').reply(500, { message: 'Error' });
             await expect(calmService.fetchNamespaceDetails()).rejects.toThrowError();

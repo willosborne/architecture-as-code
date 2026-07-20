@@ -88,7 +88,9 @@ export class CalmService {
         return this.ax
             .get('/api/calm/namespaces', { headers })
             .then((res) => {
-                return Array.isArray(res.data?.values) ? res.data.values : [];
+                const namespaces: { name: string; description: string }[] =
+                    Array.isArray(res.data?.values) ? res.data.values : [];
+                return namespaces.sort((a, b) => a.name.localeCompare(b.name));
             })
             .catch((error) => {
                 const errorMessage = 'Error fetching namespaces:';
