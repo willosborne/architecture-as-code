@@ -1,6 +1,6 @@
 import { CalmNodeSchema } from '@finos/calm-models/types';
 import { ZoomIn } from 'lucide-react';
-import { extractNodeType, resolveDetailedArchitecture } from '../reactflow/utils/calmHelpers.js';
+import { extractNodeType, isNavigableArch, resolveDetailedArchitecture } from '../reactflow/utils/calmHelpers.js';
 import { getNodeTypeColor } from '../../../theme/helpers.js';
 import { useDiagramActions } from '../../context/DiagramActionsContext.js';
 import type { ControlItem } from '../../contracts/contracts.js';
@@ -52,7 +52,7 @@ export function NodeDetails({ data }: { data: CalmNodeSchema }) {
                     <ZoomIn className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <div className="flex flex-col min-w-0">
                         <span>Detailed Architecture</span>
-                        {archResolution.type === 'internal' && onNavigateToDetailedArch ? (
+                        {isNavigableArch(archResolution) && onNavigateToDetailedArch ? (
                             <button
                                 onClick={() => onNavigateToDetailedArch(archResolution.path)}
                                 className="font-mono font-normal text-accent underline hover:text-accent/70 truncate text-left"

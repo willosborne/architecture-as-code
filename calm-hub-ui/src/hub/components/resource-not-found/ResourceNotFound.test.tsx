@@ -25,7 +25,7 @@ function renderAt(props: Parameters<typeof ResourceNotFound>[0]) {
 
 describe('ResourceNotFound', () => {
     it('echoes the requested resource and always offers the hub root', () => {
-        renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0', type: 'architectures' });
+        renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0', type: 'architectures' });
 
         expect(screen.getByText('Architecture not found')).toBeInTheDocument();
         expect(screen.getByText('finos/model-registry@1.0.0')).toBeInTheDocument();
@@ -34,20 +34,35 @@ describe('ResourceNotFound', () => {
     });
 
     it('derives the heading noun from the route type', () => {
-        const { rerender } = renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0', type: 'architectures' });
+        const { rerender } = renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0', type: 'architectures' });
         expect(screen.getByText('Architecture not found')).toBeInTheDocument();
 
         rerender(
             <MemoryRouter>
-                <ResourceNotFound namespace="finos" id="api-gateway" version="1.0.0" type="patterns" />
+                <ResourceNotFound kind="route" namespace="finos" id="api-gateway" version="1.0.0" type="patterns" />
             </MemoryRouter>
         );
         expect(screen.getByText('Pattern not found')).toBeInTheDocument();
     });
 
     it('falls back to a neutral noun for an unknown or absent type', () => {
-        renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0' });
+        renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0' });
         expect(screen.getByText('Resource not found')).toBeInTheDocument();
+    });
+
+    it('echoes a raw broken ref when refPath is provided (malformed detailed-architecture link)', () => {
+        renderAt({ kind: 'ref', refPath: '/calm/namespaces/finos/architectures/versions/1.0.0' });
+
+        expect(screen.getByText('Resource not found')).toBeInTheDocument();
+        expect(screen.getByText('/calm/namespaces/finos/architectures/versions/1.0.0')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /browse the hub/i })).toBeInTheDocument();
+    });
+
+    it('renders a generic message when a broken-ref render has no refPath (direct load of /broken-reference)', () => {
+        renderAt({ kind: 'ref' });
+
+        expect(screen.getByText('Resource not found')).toBeInTheDocument();
+        expect(screen.getByText(/The requested resource/)).toBeInTheDocument();
     });
 
     it('navigates to the parent crumb with the trail sliced, mirroring a breadcrumb click', async () => {
@@ -59,7 +74,7 @@ describe('ResourceNotFound', () => {
             { namespace: 'finos', type: 'architectures', id: 'ml-scoring-service', version: '1.0.0', name: 'ML Scoring' },
         ];
 
-        renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0', breadcrumbs: crumbs });
+        renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0', breadcrumbs: crumbs });
 
         await user.click(screen.getByRole('button', { name: 'Back to ML Scoring' }));
 
@@ -73,7 +88,7 @@ describe('ResourceNotFound', () => {
         vi.mocked(useNavigate).mockReturnValue(navigate);
         const user = userEvent.setup();
 
-        renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0' });
+        renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0' });
 
         await user.click(screen.getByRole('button', { name: /browse the hub/i }));
 
@@ -85,7 +100,7 @@ describe('ResourceNotFound', () => {
             { namespace: 'finos', type: 'architectures', id: 'ml-scoring-service', version: '1.0.0' },
         ];
 
-        renderAt({ namespace: 'finos', id: 'model-registry', version: '1.0.0', breadcrumbs: crumbs });
+        renderAt({ kind: 'route', namespace: 'finos', id: 'model-registry', version: '1.0.0', breadcrumbs: crumbs });
 
         expect(screen.getByRole('button', { name: 'Back to ml-scoring-service' })).toBeInTheDocument();
     });

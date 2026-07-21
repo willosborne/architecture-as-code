@@ -20,6 +20,9 @@ function App() {
                     <Route path="/visualizer" element={<Navigate to="/" replace />} />
                     <Route path="/namespace/:ns" element={<Hub />} />
                     <Route path="/domain/:domain" element={<Hub />} />
+                    {/* Landing page for malformed detailed-architecture refs; the
+                        broken ref itself travels in history state (brokenRef). */}
+                    <Route path="/broken-reference" element={<Hub />} />
                     <Route path="/:namespace/:type/:id/:version" element={<Hub />} />
                     <Route path="/admin" element={<AdminPage />}>
                         <Route index element={<Navigate to="entitlements" replace />} />

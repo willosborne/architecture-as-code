@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CustomNode } from './CustomNode.js';
 import { DiagramActionsContext } from '../../context/DiagramActionsContext.js';
+import { restoreLocation, setHostname } from '../../../test-support/window-location.js';
 
 vi.mock('reactflow', () => ({
     Handle: () => null,
@@ -38,7 +39,6 @@ function renderNode(props: ReturnType<typeof makeNodeProps>, onNavigateToDetaile
 describe('CustomNode — external URL support', () => {
     let openSpy: ReturnType<typeof vi.fn>;
     const originalOpen = window.open;
-    const originalLocation = window.location;
 
     beforeEach(() => {
         openSpy = vi.fn();
@@ -47,15 +47,8 @@ describe('CustomNode — external URL support', () => {
 
     afterEach(() => {
         window.open = originalOpen;
-        Object.defineProperty(window, 'location', { value: originalLocation, writable: true });
+        restoreLocation();
     });
-
-    function setHostname(hostname: string) {
-        Object.defineProperty(window, 'location', {
-            value: { ...originalLocation, hostname },
-            writable: true,
-        });
-    }
 
     function hoverNode() {
         fireEvent.mouseEnter(screen.getByTestId('custom-node'));
@@ -102,6 +95,29 @@ describe('CustomNode — external URL support', () => {
         fireEvent.click(screen.getByText('Explore Architecture'));
 
         expect(navigate).toHaveBeenCalledWith('/calm/namespaces/finos/architectures/my-arch/versions/1.0.0');
+        expect(openSpy).not.toHaveBeenCalled();
+    });
+
+    it('renders "Explore Architecture" (not "Open Architecture") for same-hostname URLs with a malformed hub path', () => {
+        setHostname('localhost');
+        const props = makeNodeProps({ 'detailed-architecture': 'http://localhost:8080/calm/namespaces/finos/architectures/versions/1.0.0' });
+        renderNode(props, vi.fn());
+
+        hoverNode();
+        expect(screen.getByText('Explore Architecture')).toBeInTheDocument();
+        expect(screen.queryByText('Open Architecture')).not.toBeInTheDocument();
+    });
+
+    it('navigates in-app (never window.open) for same-hostname URLs with a malformed hub path', () => {
+        setHostname('localhost');
+        const navigate = vi.fn();
+        const props = makeNodeProps({ 'detailed-architecture': 'http://localhost:8080/calm/namespaces/finos/architectures/versions/1.0.0' });
+        renderNode(props, navigate);
+
+        hoverNode();
+        fireEvent.click(screen.getByText('Explore Architecture'));
+
+        expect(navigate).toHaveBeenCalledWith('/calm/namespaces/finos/architectures/versions/1.0.0');
         expect(openSpy).not.toHaveBeenCalled();
     });
 
