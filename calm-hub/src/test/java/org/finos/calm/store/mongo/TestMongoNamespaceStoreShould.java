@@ -4,11 +4,16 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
 import com.mongodb.client.*;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
+import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
+import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,6 +128,53 @@ public class TestMongoNamespaceStoreShould {
 
         assertThrows(NamespaceAlreadyExistsException.class, () ->
                 mongoNamespaceStore.createNamespace(namespace, "desc"));
+    }
+
+    @Test
+    void update_namespace_description_when_it_exists() throws NamespaceNotFoundException {
+        String namespace = "finos";
+        UpdateResult updateResult = Mockito.mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(namespaceCollection.updateOne(Filters.eq("name", namespace), Updates.set("description", "new desc")))
+                .thenReturn(updateResult);
+
+        mongoNamespaceStore.updateNamespaceDescription(namespace, "new desc");
+
+        verify(namespaceCollection).updateOne(Filters.eq("name", namespace), Updates.set("description", "new desc"));
+    }
+
+    @Test
+    void throw_exception_when_updating_description_of_missing_namespace() {
+        String namespace = "missing";
+        UpdateResult updateResult = Mockito.mock(UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(namespaceCollection.updateOne(Filters.eq("name", namespace), Updates.set("description", "desc")))
+                .thenReturn(updateResult);
+
+        assertThrows(NamespaceNotFoundException.class, () ->
+                mongoNamespaceStore.updateNamespaceDescription(namespace, "desc"));
+    }
+
+    @Test
+    void delete_namespace_when_it_exists() throws NamespaceNotFoundException {
+        String namespace = "finos";
+        DeleteResult deleteResult = Mockito.mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(1L);
+        when(namespaceCollection.deleteOne(Filters.eq("name", namespace))).thenReturn(deleteResult);
+
+        mongoNamespaceStore.deleteNamespace(namespace);
+
+        verify(namespaceCollection).deleteOne(Filters.eq("name", namespace));
+    }
+
+    @Test
+    void throw_exception_when_deleting_missing_namespace() {
+        String namespace = "missing";
+        DeleteResult deleteResult = Mockito.mock(DeleteResult.class);
+        when(deleteResult.getDeletedCount()).thenReturn(0L);
+        when(namespaceCollection.deleteOne(Filters.eq("name", namespace))).thenReturn(deleteResult);
+
+        assertThrows(NamespaceNotFoundException.class, () -> mongoNamespaceStore.deleteNamespace(namespace));
     }
 
     private interface DocumentFindIterable extends FindIterable<Document> {

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DomainsPanel } from './DomainsPanel.js';
 import { CalmService } from '../../service/calm-service.js';
@@ -7,8 +7,9 @@ function mockService(domains: string[], createResult: 'ok' | 'fail' = 'ok') {
     const svc = new CalmService();
     vi.spyOn(svc, 'fetchDomains').mockResolvedValue(domains);
     vi.spyOn(svc, 'createDomain').mockImplementation(() =>
-        createResult === 'ok' ? Promise.resolve() : Promise.reject(new Error('fail'))
+        createResult === 'ok' ? Promise.resolve() : Promise.reject(new Error('Domain already exists'))
     );
+    vi.spyOn(svc, 'deleteDomain').mockResolvedValue(undefined);
     return svc;
 }
 
@@ -37,7 +38,7 @@ describe('DomainsPanel', () => {
     });
 
     describe('existing domains list', () => {
-        it('renders each domain as a badge', async () => {
+        it('renders each domain as a row', async () => {
             const svc = mockService(['retail', 'wholesale']);
             renderPanel(svc);
             expect(await screen.findByText('retail')).toBeInTheDocument();
@@ -146,7 +147,7 @@ describe('DomainsPanel', () => {
             expect(await screen.findByText('retail')).toBeInTheDocument();
         });
 
-        it('shows error message when creation fails', async () => {
+        it('shows the specific server error message when creation fails', async () => {
             const svc = mockService([], 'fail');
             renderPanel(svc);
             await screen.findByLabelText('Domain name');
@@ -157,7 +158,59 @@ describe('DomainsPanel', () => {
             fireEvent.click(screen.getByRole('button', { name: /create/i }));
 
             await waitFor(() =>
-                expect(screen.getByRole('alert')).toHaveTextContent(/failed to create domain/i)
+                expect(screen.getByRole('alert')).toHaveTextContent('Domain already exists')
+            );
+        });
+    });
+
+    describe('deleting a domain', () => {
+        it('opens a confirmation dialog when the delete button is clicked', async () => {
+            const svc = mockService(['retail']);
+            renderPanel(svc);
+            await screen.findByText('retail');
+
+            fireEvent.click(screen.getByRole('button', { name: /delete domain retail/i }));
+
+            expect(within(screen.getByRole('dialog')).getByText(/retail/)).toBeInTheDocument();
+        });
+
+        it('calls deleteDomain and refreshes the list on confirm', async () => {
+            const svc = mockService(['retail']);
+            renderPanel(svc);
+            await screen.findByText('retail');
+
+            fireEvent.click(screen.getByRole('button', { name: /delete domain retail/i }));
+            fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^delete$/i }));
+
+            await waitFor(() => expect(svc.deleteDomain).toHaveBeenCalledWith('retail'));
+        });
+
+        it('closes the dialog on Cancel without deleting', async () => {
+            const svc = mockService(['retail']);
+            renderPanel(svc);
+            await screen.findByText('retail');
+
+            fireEvent.click(screen.getByRole('button', { name: /delete domain retail/i }));
+            fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+            expect(svc.deleteDomain).not.toHaveBeenCalled();
+        });
+
+        it('shows a server error and keeps the dialog open when delete fails', async () => {
+            const svc = mockService(['retail']);
+            vi.spyOn(svc, 'deleteDomain').mockRejectedValue(
+                new Error('Domain retail contains controls and cannot be deleted')
+            );
+            renderPanel(svc);
+            await screen.findByText('retail');
+
+            fireEvent.click(screen.getByRole('button', { name: /delete domain retail/i }));
+            fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^delete$/i }));
+
+            await waitFor(() =>
+                expect(within(screen.getByRole('dialog')).getByRole('alert'))
+                    .toHaveTextContent('contains controls')
             );
         });
     });

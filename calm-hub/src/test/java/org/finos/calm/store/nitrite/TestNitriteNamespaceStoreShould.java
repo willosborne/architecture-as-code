@@ -6,6 +6,7 @@ import org.dizitart.no2.collection.DocumentCursor;
 import org.dizitart.no2.collection.NitriteCollection;
 import org.dizitart.no2.filters.Filter;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
+import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,7 +135,64 @@ public class TestNitriteNamespaceStoreShould {
         // Act & Assert
         assertThrows(NamespaceAlreadyExistsException.class, () ->
                 namespaceStore.createNamespace("existing-namespace","desc"));
-        
+
         verify(mockCollection, never()).insert(any(Document.class));
+    }
+
+    @Test
+    public void testUpdateNamespaceDescription_whenNamespaceExists_updatesDescription() throws NamespaceNotFoundException {
+        // Arrange
+        Document existingDoc = Document.createDocument("name", "finos").put("description", "old desc");
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(existingDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act
+        namespaceStore.updateNamespaceDescription("finos", "new desc");
+
+        // Assert
+        verify(mockCollection).update(any(Filter.class), any(Document.class));
+    }
+
+    @Test
+    public void testUpdateNamespaceDescription_whenNamespaceMissing_throwsException() {
+        // Arrange
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(null);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act & Assert
+        assertThrows(NamespaceNotFoundException.class, () ->
+                namespaceStore.updateNamespaceDescription("missing", "desc"));
+
+        verify(mockCollection, never()).update(any(Filter.class), any(Document.class));
+    }
+
+    @Test
+    public void testDeleteNamespace_whenNamespaceExists_removesNamespace() throws NamespaceNotFoundException {
+        // Arrange
+        Document existingDoc = Document.createDocument("name", "finos");
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(existingDoc);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act
+        namespaceStore.deleteNamespace("finos");
+
+        // Assert
+        verify(mockCollection).remove(existingDoc);
+    }
+
+    @Test
+    public void testDeleteNamespace_whenNamespaceMissing_throwsException() {
+        // Arrange
+        DocumentCursor cursor = mock(DocumentCursor.class);
+        when(cursor.firstOrNull()).thenReturn(null);
+        when(mockCollection.find(any(Filter.class))).thenReturn(cursor);
+
+        // Act & Assert
+        assertThrows(NamespaceNotFoundException.class, () -> namespaceStore.deleteNamespace("missing"));
+
+        verify(mockCollection, never()).remove(any(Document.class));
     }
 }

@@ -242,6 +242,33 @@ public class NitriteUserAccessStore implements UserAccessStore {
         }
     }
 
+    @Override
+    public void deleteAllUserAccessForNamespace(String namespace) {
+        deleteAllMatching(where(NAMESPACE_FIELD).eq(namespace));
+    }
+
+    @Override
+    public void deleteAllUserAccessForDomain(String domain) {
+        deleteAllMatching(where(DOMAIN_FIELD).eq(domain));
+    }
+
+    private void deleteAllMatching(Filter filter) {
+        lock.lock();
+        try {
+            // Materialize matches before removing — mutating the collection while its
+            // cursor is still being iterated is unsafe.
+            List<Document> matches = new ArrayList<>();
+            for (Document doc : userAccessCollection.find(filter)) {
+                matches.add(doc);
+            }
+            for (Document doc : matches) {
+                userAccessCollection.remove(doc);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
     private UserAccess buildUserAccessFromDocument(Document doc) {
         return new UserAccess.UserAccessBuilder()
                 .setUsername(doc.get(USERNAME_FIELD, String.class))

@@ -10,6 +10,7 @@ import org.dizitart.no2.filters.Filter;
 import org.finos.calm.config.StandaloneQualifier;
 import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.finos.calm.store.DomainStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,5 +93,25 @@ public class NitriteDomainStore implements DomainStore {
     public boolean domainExists(String name) {
         Filter filter = where(NAME_FIELD).eq(name);
         return domainCollection.find(filter).firstOrNull() != null;
+    }
+
+    /**
+     * Deletes a domain, guarded by the same {@link ReentrantLock} used by
+     * {@link #createDomain} to serialize writes against concurrent create/delete races.
+     */
+    @Override
+    public void deleteDomain(String name) throws DomainNotFoundException {
+        lock.lock();
+        try {
+            Filter filter = where(NAME_FIELD).eq(name);
+            Document existing = domainCollection.find(filter).firstOrNull();
+            if (existing == null) {
+                throw new DomainNotFoundException(name);
+            }
+            domainCollection.remove(existing);
+            LOG.info("Deleted domain: {}", name);
+        } finally {
+            lock.unlock();
+        }
     }
 }

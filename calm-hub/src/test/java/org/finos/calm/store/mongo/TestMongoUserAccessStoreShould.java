@@ -562,6 +562,20 @@ public class TestMongoUserAccessStoreShould {
                 () -> mongoUserAccessStore.deleteUserAccessForNamespace(namespace, userAccessId));
     }
 
+    @Test
+    void delete_all_user_access_for_namespace() {
+        mongoUserAccessStore.deleteAllUserAccessForNamespace("finos");
+
+        verify(userAccessCollection).deleteMany(Filters.eq("namespace", "finos"));
+    }
+
+    @Test
+    void delete_all_user_access_for_domain() {
+        mongoUserAccessStore.deleteAllUserAccessForDomain("payments");
+
+        verify(userAccessCollection).deleteMany(Filters.eq("domain", "payments"));
+    }
+
     private interface DocumentFindIterable extends FindIterable<Document> {
     }
 

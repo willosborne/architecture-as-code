@@ -300,6 +300,8 @@ public class AuditRequestFilter implements ContainerResponseFilter {
             action = "POST".equals(method) ? AuditAction.GRANT : AuditAction.REVOKE;
         } else if ("POST".equals(method)) {
             action = pathEntityId != null ? AuditAction.UPDATE : AuditAction.CREATE;
+        } else if ("DELETE".equals(method)) {
+            action = AuditAction.DELETE;
         } else {
             return null;
         }
@@ -316,6 +318,16 @@ public class AuditRequestFilter implements ContainerResponseFilter {
             if (version == null) {
                 version = ids.version();
             }
+        }
+
+        // A domain has no separate parent scope — it IS the scope, the same way namespace
+        // creation reports its name via `namespace`, not `entityId` (see NamespaceResource
+        // #createNamespace). Without this, DomainResource#createDomain would be the only
+        // domain-scoped action reporting the domain's name via entityId instead of domain,
+        // splitting a single domain's audit trail across two fields depending on action.
+        if (entityType == AuditEntityType.DOMAIN && domain == null) {
+            domain = entityId;
+            entityId = null;
         }
 
         return new AuditContext(entityType, action, namespace, domain, entityId, version);
@@ -381,6 +393,14 @@ public class AuditRequestFilter implements ContainerResponseFilter {
             LocationSegmentParser.LocationIds ids = LocationSegmentParser.parse(entityType, locationPath(responseContext));
             entityId = ids.entityId();
             version = ids.version();
+        }
+        // See the matching comment in resolveGeneric: a domain IS the scope, so its name
+        // belongs in `domain`, not `entityId` — MappingControllerResource#createDomain
+        // is the only caller of this method with entityType DOMAIN, and always passes
+        // domain == null, so this never overrides a real parent-domain scope.
+        if (entityType == AuditEntityType.DOMAIN && domain == null) {
+            domain = entityId;
+            entityId = null;
         }
         return new AuditContext(entityType, AuditAction.CREATE, null, domain, entityId, version);
     }

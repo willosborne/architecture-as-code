@@ -9,6 +9,7 @@ import org.dizitart.no2.collection.NitriteCollection;
 import org.dizitart.no2.filters.Filter;
 import org.finos.calm.config.StandaloneQualifier;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
+import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
 import org.finos.calm.store.NamespaceStore;
 import org.slf4j.Logger;
@@ -97,6 +98,47 @@ public class NitriteNamespaceStore implements NamespaceStore {
                     .put(DESCRIPTION_FIELD, description);
             namespaceCollection.insert(namespaceDoc);
             LOG.info("Created namespace: {}", name);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Updates a namespace's description, guarded by the same {@link ReentrantLock} used by
+     * {@link #createNamespace} to serialize writes against concurrent create/update races.
+     */
+    @Override
+    public void updateNamespaceDescription(String name, String description) throws NamespaceNotFoundException {
+        lock.lock();
+        try {
+            Filter filter = where(NAME_FIELD).eq(name);
+            Document doc = namespaceCollection.find(filter).firstOrNull();
+            if (doc == null) {
+                throw new NamespaceNotFoundException();
+            }
+            doc.put(DESCRIPTION_FIELD, description);
+            namespaceCollection.update(filter, doc);
+            LOG.info("Updated description for namespace: {}", name);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Deletes a namespace, guarded by the same {@link ReentrantLock} used by
+     * {@link #createNamespace} to serialize writes against concurrent create/delete races.
+     */
+    @Override
+    public void deleteNamespace(String name) throws NamespaceNotFoundException {
+        lock.lock();
+        try {
+            Filter filter = where(NAME_FIELD).eq(name);
+            Document existing = namespaceCollection.find(filter).firstOrNull();
+            if (existing == null) {
+                throw new NamespaceNotFoundException();
+            }
+            namespaceCollection.remove(existing);
+            LOG.info("Deleted namespace: {}", name);
         } finally {
             lock.unlock();
         }

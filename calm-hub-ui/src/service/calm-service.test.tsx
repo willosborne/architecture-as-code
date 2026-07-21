@@ -56,7 +56,91 @@ describe('CalmService', () => {
         });
     });
 
+    describe('fetchNamespaceDetails', () => {
+        it('should retrieve namespace name and description pairs', async () => {
+            const expectedNamespaces = [
+                { name: 'ns1', description: 'namespace 1' },
+                { name: 'ns2', description: 'namespace 2' },
+            ];
+            mock.onGet('/api/calm/namespaces').reply(200, { values: expectedNamespaces });
+            const actual = await calmService.fetchNamespaceDetails();
+            expect(actual).toEqual(expectedNamespaces);
+        });
+
+        it('should return namespaces in alphabetical order regardless of API response order', async () => {
+            mock.onGet('/api/calm/namespaces').reply(200, {
+                values: [
+                    { name: 'zebra', description: '' },
+                    { name: 'apple', description: '' },
+                    { name: 'mango', description: '' },
+                ],
+            });
+            const actual = await calmService.fetchNamespaceDetails();
+            expect(actual.map((ns) => ns.name)).toEqual(['apple', 'mango', 'zebra']);
+        });
+
+        it('should throw an error when backend returns error status', async () => {
+            mock.onGet('/api/calm/namespaces').reply(500, { message: 'Error' });
+            await expect(calmService.fetchNamespaceDetails()).rejects.toThrowError();
+        });
+    });
+
+    describe('createNamespace', () => {
+        it('should post the name and description', async () => {
+            mock.onPost('/api/calm/namespaces', { name: 'ns1', description: 'desc' }).reply(201);
+            await expect(calmService.createNamespace('ns1', 'desc')).resolves.toBeUndefined();
+        });
+
+        it('should surface the server-provided error message from a JSON error body', async () => {
+            mock.onPost('/api/calm/namespaces').reply(409, { error: 'Namespace already exists' });
+            await expect(calmService.createNamespace('ns1', 'desc')).rejects.toThrowError('Namespace already exists');
+        });
+
+        it('should surface the server-provided error message from a plain-text error body', async () => {
+            mock.onPost('/api/calm/namespaces').reply(404, 'Invalid namespace provided: ns1');
+            await expect(calmService.createNamespace('ns1', 'desc')).rejects.toThrowError('Invalid namespace provided: ns1');
+        });
+
+        it('should fall back to a generic error message when the body has no error text', async () => {
+            mock.onPost('/api/calm/namespaces').reply(500, { message: 'unexpected' });
+            await expect(calmService.createNamespace('ns1', 'desc')).rejects.toThrowError('Error creating namespace ns1:');
+        });
+    });
+
+    describe('updateNamespace', () => {
+        it('should put the new description', async () => {
+            mock.onPut('/api/calm/namespaces/ns1', { description: 'new desc' }).reply(204);
+            await expect(calmService.updateNamespace('ns1', 'new desc')).resolves.toBeUndefined();
+        });
+
+        it('should surface the server-provided error message when the namespace is missing', async () => {
+            mock.onPut('/api/calm/namespaces/missing').reply(404, 'Invalid namespace provided: missing');
+            await expect(calmService.updateNamespace('missing', 'desc'))
+                .rejects.toThrowError('Invalid namespace provided: missing');
+        });
+    });
+
+    describe('deleteNamespace', () => {
+        it('should delete the namespace', async () => {
+            mock.onDelete('/api/calm/namespaces/ns1').reply(204);
+            await expect(calmService.deleteNamespace('ns1')).resolves.toBeUndefined();
+        });
+
+        it('should surface the server-provided error message when the namespace is not empty', async () => {
+            mock.onDelete('/api/calm/namespaces/ns1')
+                .reply(409, 'Namespace ns1 contains resources and cannot be deleted');
+            await expect(calmService.deleteNamespace('ns1'))
+                .rejects.toThrowError('Namespace ns1 contains resources and cannot be deleted');
+        });
+    });
+
     describe('fetchDomains', () => {
+        it('should retrieve all domains', async () => {
+            mock.onGet('/api/calm/domains').reply(200, { values: ['retail', 'wholesale'] });
+            const actual = await calmService.fetchDomains();
+            expect(actual).toEqual(['retail', 'wholesale']);
+        });
+
         it('should return domains in alphabetical order regardless of API response order', async () => {
             mock.onGet('/api/calm/domains').reply(200, { values: ['wholesale', 'retail'] });
             const actual = await calmService.fetchDomains();
@@ -66,6 +150,32 @@ describe('CalmService', () => {
         it('should throw an error when backend returns error status', async () => {
             mock.onGet('/api/calm/domains').reply(500, { message: 'Error' });
             await expect(calmService.fetchDomains()).rejects.toThrowError();
+        });
+    });
+
+    describe('createDomain', () => {
+        it('should post the name', async () => {
+            mock.onPost('/api/calm/domains', { name: 'retail' }).reply(201);
+            await expect(calmService.createDomain('retail')).resolves.toBeUndefined();
+        });
+
+        it('should surface the server-provided error message on conflict', async () => {
+            mock.onPost('/api/calm/domains').reply(409, { error: 'Domain already exists' });
+            await expect(calmService.createDomain('retail')).rejects.toThrowError('Domain already exists');
+        });
+    });
+
+    describe('deleteDomain', () => {
+        it('should delete the domain', async () => {
+            mock.onDelete('/api/calm/domains/retail').reply(204);
+            await expect(calmService.deleteDomain('retail')).resolves.toBeUndefined();
+        });
+
+        it('should surface the server-provided error message when the domain is not empty', async () => {
+            mock.onDelete('/api/calm/domains/retail')
+                .reply(409, 'Domain retail contains controls and cannot be deleted');
+            await expect(calmService.deleteDomain('retail'))
+                .rejects.toThrowError('Domain retail contains controls and cannot be deleted');
         });
     });
 

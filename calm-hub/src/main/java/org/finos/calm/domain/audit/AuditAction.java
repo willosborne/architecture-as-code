@@ -6,6 +6,7 @@ package org.finos.calm.domain.audit;
 public enum AuditAction {
     CREATE,
     UPDATE,
+    DELETE,
     GRANT,
     REVOKE
 }

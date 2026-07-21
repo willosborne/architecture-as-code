@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalmService } from '../../service/calm-service.js';
+import { DomainRow } from '../components/domains/DomainRow.js';
+import { ConfirmDeleteDialog } from '../components/ConfirmDeleteDialog.js';
+import { useDeleteConfirmation } from '../hooks/useDeleteConfirmation.js';
 
 interface DomainsPanelProps {
     calmService?: CalmService;
@@ -20,13 +23,22 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
     const load = useCallback(() => {
         setLoading(true);
         setLoadError(null);
-        svc.fetchDomains()
+        return svc.fetchDomains()
             .then(setDomains)
             .catch(() => setLoadError('Failed to load domains.'))
             .finally(() => setLoading(false));
     }, [svc]);
 
     useEffect(() => { load(); }, [load]);
+
+    const {
+        pending: pendingDelete,
+        deleting,
+        error: deleteError,
+        requestDelete: handleRequestDelete,
+        cancelDelete: handleCancelDelete,
+        confirmDelete: handleConfirmDelete,
+    } = useDeleteConfirmation((domainName) => svc.deleteDomain(domainName), load, 'Failed to delete domain.');
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -37,9 +49,9 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
             await svc.createDomain(name.trim());
             setSuccess(`Domain '${name.trim()}' created.`);
             setName('');
-            load();
-        } catch {
-            setSubmitError('Failed to create domain.');
+            await load();
+        } catch (err) {
+            setSubmitError(err instanceof Error ? err.message : 'Failed to create domain.');
         } finally {
             setSubmitting(false);
         }
@@ -82,13 +94,37 @@ export function DomainsPanel({ calmService }: DomainsPanelProps) {
                     <p className="text-base-content/50 text-sm italic">No domains yet.</p>
                 )}
                 {!loading && domains.length > 0 && (
-                    <ul className="flex flex-wrap gap-2">
-                        {domains.map((d) => (
-                            <li key={d} className="badge badge-ghost badge-lg">{d}</li>
-                        ))}
-                    </ul>
+                    <div className="overflow-x-auto">
+                        <table className="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {domains.map((d) => (
+                                    <DomainRow key={d} name={d} onRequestDelete={handleRequestDelete} />
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </section>
+
+            <ConfirmDeleteDialog
+                open={!!pendingDelete}
+                message={
+                    <>
+                        Delete domain <span className="font-mono font-semibold">{pendingDelete}</span>?
+                        This also removes all user-access grants for it. This cannot be undone.
+                    </>
+                }
+                error={deleteError}
+                deleting={deleting}
+                onConfirm={handleConfirmDelete}
+                onCancel={handleCancelDelete}
+            />
         </div>
     );
 }

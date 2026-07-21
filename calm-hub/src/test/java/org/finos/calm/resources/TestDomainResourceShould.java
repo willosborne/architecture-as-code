@@ -6,6 +6,8 @@ import io.quarkus.test.security.TestSecurity;
 import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.controls.DomainControlCount;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotEmptyException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.finos.calm.services.CountsService;
 import org.finos.calm.services.DomainService;
 import org.junit.jupiter.api.Test;
@@ -158,5 +160,49 @@ public class TestDomainResourceShould {
                 .statusCode(409);
 
         verify(mockDomainService).createDomain(TEST_DOMAIN);
+    }
+
+    @Test
+    void delete_a_domain_successfully() throws Exception {
+        given()
+                .when().delete(CALM_DOMAINS + "/" + TEST_DOMAIN)
+                .then()
+                .statusCode(204);
+
+        verify(mockDomainService).deleteDomain(TEST_DOMAIN);
+    }
+
+    @Test
+    void return_404_when_deleting_a_missing_domain() throws Exception {
+        doThrow(new DomainNotFoundException("missing"))
+                .when(mockDomainService).deleteDomain("missing");
+
+        given()
+                .when().delete(CALM_DOMAINS + "/missing")
+                .then()
+                .statusCode(404);
+    }
+
+    @Test
+    void return_409_when_deleting_a_domain_that_is_not_empty() throws Exception {
+        doThrow(new DomainNotEmptyException(TEST_DOMAIN))
+                .when(mockDomainService).deleteDomain(TEST_DOMAIN);
+
+        given()
+                .when().delete(CALM_DOMAINS + "/" + TEST_DOMAIN)
+                .then()
+                .statusCode(409)
+                .body(containsString("contains controls"));
+    }
+
+    @Test
+    void return_400_when_deleting_domain_with_invalid_format() throws Exception {
+        given()
+                .when().delete(CALM_DOMAINS + "/invalid_domain")
+                .then()
+                .statusCode(400)
+                .body(containsString(DOMAIN_MESSAGE));
+
+        verify(mockDomainService, never()).deleteDomain(any());
     }
 }

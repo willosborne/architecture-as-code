@@ -2,6 +2,7 @@ package org.finos.calm.services;
 
 import org.finos.calm.domain.UserAccess;
 import org.finos.calm.domain.exception.NamespaceAlreadyExistsException;
+import org.finos.calm.domain.exception.NamespaceNotEmptyException;
 import org.finos.calm.domain.exception.NamespaceNotFoundException;
 import org.finos.calm.domain.exception.NamespaceParentNotFoundException;
 import org.finos.calm.domain.namespaces.NamespaceInfo;
@@ -33,11 +34,14 @@ class TestNamespaceServiceShould {
     @Mock
     UserAccessStore mockUserAccessStore;
 
+    @Mock
+    NamespaceContentService mockNamespaceContentService;
+
     NamespaceService service;
 
     @BeforeEach
     void setUp() {
-        service = new NamespaceService(mockNamespaceStore, mockUserAccessStore);
+        service = new NamespaceService(mockNamespaceStore, mockUserAccessStore, mockNamespaceContentService);
     }
 
     @Test
@@ -122,5 +126,71 @@ class TestNamespaceServiceShould {
 
         verify(mockNamespaceStore, never()).getNamespaces();
         verify(mockNamespaceStore).createNamespace("newteam", "desc");
+    }
+
+    @Test
+    void update_namespace_description_delegates_to_store() throws NamespaceNotFoundException {
+        service.updateNamespaceDescription("finos", "new description");
+
+        verify(mockNamespaceStore).updateNamespaceDescription("finos", "new description");
+    }
+
+    @Test
+    void propagate_namespace_not_found_when_updating_missing_namespace_description() throws NamespaceNotFoundException {
+        doThrow(new NamespaceNotFoundException())
+                .when(mockNamespaceStore).updateNamespaceDescription("missing", "desc");
+
+        assertThrows(NamespaceNotFoundException.class,
+                () -> service.updateNamespaceDescription("missing", "desc"));
+    }
+
+    @Test
+    void delete_namespace_and_cascade_delete_grants_when_empty() throws Exception {
+        when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
+        when(mockNamespaceStore.getNamespaces()).thenReturn(List.of(new NamespaceInfo("finos", "desc")));
+        when(mockNamespaceContentService.hasContent("finos")).thenReturn(false);
+
+        service.deleteNamespace("finos");
+
+        verify(mockNamespaceStore).deleteNamespace("finos");
+        verify(mockUserAccessStore).deleteAllUserAccessForNamespace("finos");
+    }
+
+    @Test
+    void throw_namespace_not_found_when_deleting_missing_namespace() throws NamespaceNotFoundException {
+        when(mockNamespaceStore.namespaceExists("missing")).thenReturn(false);
+
+        assertThrows(NamespaceNotFoundException.class, () -> service.deleteNamespace("missing"));
+
+        verify(mockNamespaceStore, never()).deleteNamespace(any());
+        verify(mockUserAccessStore, never()).deleteAllUserAccessForNamespace(any());
+    }
+
+    @Test
+    void throw_namespace_not_empty_and_skip_delete_when_child_namespaces_exist() throws NamespaceNotFoundException {
+        when(mockNamespaceStore.namespaceExists("org")).thenReturn(true);
+        when(mockNamespaceStore.getNamespaces()).thenReturn(List.of(
+                new NamespaceInfo("org", "desc"),
+                new NamespaceInfo("org.finos", "child desc")));
+
+        NamespaceNotEmptyException ex = assertThrows(NamespaceNotEmptyException.class,
+                () -> service.deleteNamespace("org"));
+        assertThat(ex.getNamespace(), is("org"));
+        assertThat(ex.getChildNamespaceCount(), is(1));
+
+        verify(mockNamespaceStore, never()).deleteNamespace(any());
+        verify(mockUserAccessStore, never()).deleteAllUserAccessForNamespace(any());
+    }
+
+    @Test
+    void throw_namespace_not_empty_and_skip_delete_when_namespace_has_content() throws NamespaceNotFoundException {
+        when(mockNamespaceStore.namespaceExists("finos")).thenReturn(true);
+        when(mockNamespaceContentService.hasContent("finos")).thenReturn(true);
+
+        assertThrows(NamespaceNotEmptyException.class, () -> service.deleteNamespace("finos"));
+
+        verify(mockNamespaceStore, never()).getNamespaces();
+        verify(mockNamespaceStore, never()).deleteNamespace(any());
+        verify(mockUserAccessStore, never()).deleteAllUserAccessForNamespace(any());
     }
 }

@@ -7,6 +7,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
@@ -17,6 +18,8 @@ import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.ValueWrapper;
 import org.finos.calm.domain.controls.DomainControlCount;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotEmptyException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 import org.finos.calm.security.CalmHubPermissionChecker;
 import org.finos.calm.security.CalmHubScopes;
 import org.finos.calm.security.UserAccessValidator;
@@ -26,6 +29,11 @@ import org.finos.calm.services.DomainService;
 import java.net.URI;
 import java.util.Optional;
 import java.util.Set;
+
+import static org.finos.calm.resources.CalmResourceErrorResponses.domainNotEmptyResponse;
+import static org.finos.calm.resources.CalmResourceErrorResponses.invalidDomainResponse;
+import static org.finos.calm.resources.ResourceValidationConstants.DOMAIN_MESSAGE;
+import static org.finos.calm.resources.ResourceValidationConstants.DOMAIN_REGEX;
 
 /**
  * REST resource for managing domains.
@@ -110,6 +118,26 @@ public class DomainResource {
             return Response.status(Response.Status.CONFLICT).entity("{\"error\":\"Domain already exists\"}").build();
         }
         return Response.created(URI.create("/api/calm/domains/" + domainName)).build();
+    }
+
+    @DELETE
+    @Path("{domain}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(
+            summary = "Delete Domain",
+            description = "Deletes a domain, provided it has no controls. Also removes all user-access grants for the domain."
+    )
+    @PermissionsAllowed(CalmHubScopes.GLOBAL_ADMIN)
+    public Response deleteDomain(
+            @PathParam("domain") @Pattern(regexp = DOMAIN_REGEX, message = DOMAIN_MESSAGE) String domain) {
+        try {
+            service.deleteDomain(domain);
+        } catch (DomainNotFoundException e) {
+            return invalidDomainResponse(domain);
+        } catch (DomainNotEmptyException e) {
+            return domainNotEmptyResponse(e.getDomain());
+        }
+        return Response.noContent().build();
     }
 
 }

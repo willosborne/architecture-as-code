@@ -2,6 +2,7 @@ package org.finos.calm.store;
 
 import org.finos.calm.domain.Domain;
 import org.finos.calm.domain.exception.DomainAlreadyExistsException;
+import org.finos.calm.domain.exception.DomainNotFoundException;
 
 import java.util.List;
 
@@ -33,4 +34,13 @@ public interface DomainStore {
      * @return true if the domain exists, false otherwise
      */
     boolean domainExists(String name);
+
+    /**
+     * Deletes a domain. Callers are responsible for verifying the domain is empty
+     * (no controls) before calling this — this method performs no such checks itself.
+     *
+     * @param name the name of the domain to delete
+     * @throws DomainNotFoundException if no domain with the given name exists
+     */
+    void deleteDomain(String name) throws DomainNotFoundException;
 }
