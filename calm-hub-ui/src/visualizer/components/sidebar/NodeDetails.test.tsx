@@ -1,9 +1,10 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NodeDetails } from './NodeDetails.js';
 import { DiagramActionsContext } from '../../context/DiagramActionsContext.js';
 import { CalmNodeSchema } from '@finos/calm-models/types';
+import { restoreLocation, setHostname } from '../../../test-support/window-location.js';
 
 function renderWithNavigation(node: CalmNodeSchema, onNavigateToDetailedArch: (ref: string) => void) {
     return render(
@@ -21,6 +22,10 @@ const baseNode: CalmNodeSchema = {
 };
 
 describe('NodeDetails', () => {
+    // No-op unless a test called setHostname; keeps a failed assertion from
+    // leaking the overridden window.location into the tests that follow.
+    afterEach(() => restoreLocation());
+
     it('renders node name, unique-id, and description', () => {
         render(<NodeDetails data={baseNode} />);
 
@@ -151,27 +156,36 @@ describe('NodeDetails', () => {
     });
 
     it('renders detailed architecture as a clickable button for same-hostname absolute URLs (e.g. different port in dev)', async () => {
-        const originalLocation = window.location;
-        Object.defineProperty(window, 'location', { value: { ...originalLocation, hostname: 'localhost' }, writable: true });
+        setHostname('localhost');
+        const user = userEvent.setup();
+        const onNavigate = vi.fn();
+        const nodeWithDetails: CalmNodeSchema = {
+            ...baseNode,
+            details: { 'detailed-architecture': 'http://localhost:8080/calm/namespaces/finos/architectures/2/versions/1.0.0' },
+        };
+        renderWithNavigation(nodeWithDetails, onNavigate);
 
-        // try/finally: a failing assertion must not leak the overridden
-        // window.location into the tests that follow.
-        try {
-            const user = userEvent.setup();
-            const onNavigate = vi.fn();
-            const nodeWithDetails: CalmNodeSchema = {
-                ...baseNode,
-                details: { 'detailed-architecture': 'http://localhost:8080/calm/namespaces/finos/architectures/2/versions/1.0.0' },
-            };
-            renderWithNavigation(nodeWithDetails, onNavigate);
+        const btn = screen.getByRole('button', { name: 'http://localhost:8080/calm/namespaces/finos/architectures/2/versions/1.0.0' });
+        expect(btn).toBeInTheDocument();
+        await user.click(btn);
+        expect(onNavigate).toHaveBeenCalledWith('/calm/namespaces/finos/architectures/2/versions/1.0.0');
+    });
 
-            const btn = screen.getByRole('button', { name: 'http://localhost:8080/calm/namespaces/finos/architectures/2/versions/1.0.0' });
-            expect(btn).toBeInTheDocument();
-            await user.click(btn);
-            expect(onNavigate).toHaveBeenCalledWith('/calm/namespaces/finos/architectures/2/versions/1.0.0');
-        } finally {
-            Object.defineProperty(window, 'location', { value: originalLocation, writable: true });
-        }
+    it('renders a same-hostname URL with a malformed hub path as a clickable button (in-app not-found, not a new tab)', async () => {
+        setHostname('localhost');
+        const user = userEvent.setup();
+        const onNavigate = vi.fn();
+        const nodeWithDetails: CalmNodeSchema = {
+            ...baseNode,
+            details: { 'detailed-architecture': 'http://localhost:8080/calm/namespaces/finos/architectures/versions/1.0.0' },
+        };
+        renderWithNavigation(nodeWithDetails, onNavigate);
+
+        const btn = screen.getByRole('button', { name: 'http://localhost:8080/calm/namespaces/finos/architectures/versions/1.0.0' });
+        expect(btn).toBeInTheDocument();
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+        await user.click(btn);
+        expect(onNavigate).toHaveBeenCalledWith('/calm/namespaces/finos/architectures/versions/1.0.0');
     });
 
     it('renders extra properties not in the known set', () => {

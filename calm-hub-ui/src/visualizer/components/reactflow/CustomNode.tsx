@@ -17,7 +17,7 @@ import {
     ExternalLink,
     Info,
 } from 'lucide-react';
-import { extractId, extractNodeType, resolveDetailedArchitecture } from './utils/calmHelpers.js';
+import { extractId, extractNodeType, isNavigableArch, resolveDetailedArchitecture } from './utils/calmHelpers.js';
 import { THEME, getNodeTypeColor, getRiskLevelColor } from './theme.js';
 import type { RiskItem, MitigationItem, ControlItem } from '../../contracts/contracts.js';
 import { useDiagramActions } from '../../context/DiagramActionsContext.js';
@@ -84,13 +84,16 @@ export function CustomNode({ data }: NodeProps) {
   const nodeType = extractNodeType(data) || 'Unknown';
   const detailedArchitecture = data.details?.['detailed-architecture'];
   const archResolution = resolveDetailedArchitecture(detailedArchitecture);
-  const isSameOriginArch = archResolution.type === 'internal';
+  // 'invalid' (a same-host URL with a broken hub path) navigates in-app too: the
+  // router lands it on the not-found view, which beats a new tab onto the
+  // backend's raw 404.
+  const isSameOriginArch = isNavigableArch(archResolution);
   const isExternalArch = archResolution.type === 'external';
   // A truthy ref that resolves to neither an in-app path nor an openable URL
   // (e.g. a bare filename). There is no drill-down action for it, so the header
   // indicator is suppressed and the hover panel surfaces the raw value instead.
   const isUnknownArch = !!detailedArchitecture && archResolution.type === 'unknown';
-  const archPath = archResolution.type === 'internal' ? archResolution.path : undefined;
+  const archPath = isSameOriginArch ? archResolution.path : undefined;
 
     // Extract AIGF data (if present in node metadata)
     const aigf = data.metadata?.aigf;

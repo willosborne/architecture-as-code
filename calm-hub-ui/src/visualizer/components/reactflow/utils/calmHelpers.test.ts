@@ -1,4 +1,4 @@
-import { extractId, extractNodeType, extractRelationshipType, getRelationshipTypeDisplayString, parseCALMHubPath, resolveDetailedArchitecture } from "./calmHelpers.js";
+import { extractId, extractNodeType, extractRelationshipType, getRelationshipTypeDisplayString, isNavigableArch, parseCALMHubPath, resolveDetailedArchitecture } from "./calmHelpers.js";
 import { describe, expect, it } from "vitest";
 
 describe('calmHelpers', () => {
@@ -136,14 +136,34 @@ describe('calmHelpers', () => {
                 .toEqual({ type: 'external' });
         });
 
-        it('returns external for same-hostname URLs whose path is not a CALM Hub resource', () => {
+        it('returns invalid with the pathname for same-hostname URLs whose path is not a CALM Hub resource', () => {
             expect(resolveDetailedArchitecture('http://localhost:8080/some/other/page', 'localhost'))
-                .toEqual({ type: 'external' });
+                .toEqual({ type: 'invalid', path: '/some/other/page' });
+        });
+
+        it('returns invalid for same-hostname hub URLs with a missing id segment', () => {
+            expect(resolveDetailedArchitecture('http://localhost:8080/calm/namespaces/finos/architectures/versions/1.0.0', 'localhost'))
+                .toEqual({ type: 'invalid', path: '/calm/namespaces/finos/architectures/versions/1.0.0' });
         });
 
         it('returns unknown for bare paths that are not a CALM Hub resource', () => {
             expect(resolveDetailedArchitecture('/calm/controls/some-control', 'localhost'))
                 .toEqual({ type: 'unknown' });
+        });
+    });
+
+    describe('isNavigableArch', () => {
+        it('returns true for internal resolutions', () => {
+            expect(isNavigableArch({ type: 'internal', path: '/calm/namespaces/finos/architectures/my-arch/versions/1.0.0' })).toBe(true);
+        });
+
+        it('returns true for invalid resolutions (they navigate to the in-app not-found view)', () => {
+            expect(isNavigableArch({ type: 'invalid', path: '/some/other/page' })).toBe(true);
+        });
+
+        it('returns false for external and unknown resolutions', () => {
+            expect(isNavigableArch({ type: 'external' })).toBe(false);
+            expect(isNavigableArch({ type: 'unknown' })).toBe(false);
         });
     });
 
