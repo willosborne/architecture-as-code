@@ -126,7 +126,7 @@ public class NamespaceResource {
         // since the namespace name lives in the body) so AuditRequestFilter can record a
         // fully-identified DENIED entry, not just an anonymous 403.
         AuditRequestFilter.stage(new AuditRequestFilter.AuditContext(
-                AuditEntityType.NAMESPACE, AuditAction.CREATE, null, null, name, null));
+                AuditEntityType.NAMESPACE, AuditAction.CREATE, name, null, null, null));
 
         boolean isGlobalAdmin = permissionChecker.hasGlobalAdmin(identity);
         boolean isChildNamespace = name.contains(".");

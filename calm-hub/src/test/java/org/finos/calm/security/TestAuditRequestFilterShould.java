@@ -260,6 +260,24 @@ public class TestAuditRequestFilterShould {
     }
 
     @Test
+    void resolve_domain_creation_via_location_into_domain_field_not_entity_id() {
+        // DomainResource.createDomain: no domain-name path param, resolved generically —
+        // a domain is its own scope, so its name belongs in `domain`, matching how
+        // DomainResource.deleteDomain reports it via the {domain} path param.
+        when(resourceInfo.getResourceClass()).thenReturn((Class) DomainResource.class);
+        ContainerRequestContext requestContext = mockRequest("POST", new MultivaluedHashMap<>());
+        ContainerResponseContext responseContext = mockResponse(201, "/api/calm/domains/payments");
+
+        filter.filter(requestContext, responseContext);
+
+        AuditLogEntry entry = captureRecordedEntry();
+        assertThat(entry.getEntityType(), is(AuditEntityType.DOMAIN));
+        assertThat(entry.getAction(), is(AuditAction.CREATE));
+        assertThat(entry.getDomain(), is("payments"));
+        assertNull(entry.getEntityId());
+    }
+
+    @Test
     void resolve_adr_create_via_revisions_location() {
         when(resourceInfo.getResourceClass()).thenReturn((Class) AdrResource.class);
         MultivaluedMap<String, String> pathParams = new MultivaluedHashMap<>();
@@ -446,7 +464,8 @@ public class TestAuditRequestFilterShould {
 
         AuditLogEntry entry = captureRecordedEntry();
         assertThat(entry.getEntityType(), is(AuditEntityType.DOMAIN));
-        assertThat(entry.getEntityId(), is("payments"));
+        assertThat(entry.getDomain(), is("payments"));
+        assertNull(entry.getEntityId());
     }
 
     @Test
