@@ -31,8 +31,8 @@ export function useDeleteConfirmation(
         setError(null);
         try {
             await deleteFn(pending);
-            setPending(null);
             await onDeleted();
+            setPending(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : fallbackErrorMessage);
         } finally {

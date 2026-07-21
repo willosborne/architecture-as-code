@@ -49,6 +49,10 @@ describe('useDeleteConfirmation', () => {
 
         expect(onDeleted).toHaveBeenCalled();
         expect(result.current.error).toBe('refresh failed');
+        // Regression check: pending must stay set when onDeleted rejects, since
+        // ConfirmDeleteDialog is only rendered (and so the error only visible) while
+        // pending is non-null.
+        expect(result.current.pending).toBe('finos');
     });
 
     it('sets error and keeps pending when deleteFn rejects with an Error', async () => {
