@@ -166,6 +166,7 @@ calm docify -a architecture.json -o docs/output --export-diagrams svg
 - `--diagram-render-timeout <ms>`: per-diagram render timeout (default `30000`).
 - Adds roughly 10-40 seconds to the command depending on the number of diagrams.
 - If no browser is found, or a diagram fails to render (timeout/invalid syntax), that diagram is left as a Mermaid code block with a warning logged; the rest of the documentation is unaffected. An invalid `--browser-path` is a fatal error.
+- On headless or locked-down Linux dev boxes (common in corporate environments), automatic detection will usually fail because no GUI browser is installed — this is expected and non-fatal. **Do not attempt to install a browser (e.g. `apt-get install chromium`) yourself.** Tell the user, and let them decide whether to supply `--browser-path` to an existing browser or skip diagram export.
 
 ### Using `--url-to-local-file-mapping`
 
