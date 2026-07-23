@@ -91,6 +91,12 @@ describe('CalmHubClient', () => {
                 request: 'GET /api/calm/namespaces'
             });
         });
+
+        it('throws HubClientError instead of returning [] when the 200 body is a literal null', async () => {
+            mock.onGet('/api/calm/namespaces').reply(200, null);
+
+            await expect(client.listNamespaces()).rejects.toBeInstanceOf(HubClientError);
+        });
     });
 
     // ── auth plugin ──────────────────────────────────────────────────────────

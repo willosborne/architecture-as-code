@@ -396,22 +396,23 @@ export class CalmHubClient {
     
     /**
      * Extracts the `values` array from a Hub list-response body, treating an object with no
-     * `values` key (or no body at all) as a legitimately empty list. Anything that isn't a
-     * plain object - e.g. a string body - is rejected rather than silently swallowed, since a
-     * 200 response that doesn't look like Hub JSON is more likely an auth gateway/proxy
-     * returning a login page for a failed/expired credential than an actual empty result.
+     * `values` key (or a genuinely absent body) as a legitimately empty list. Anything else -
+     * a string, `null`, an array, or another non-object - is rejected rather than silently
+     * swallowed, since a 200 response that doesn't look like Hub JSON is more likely an auth
+     * gateway/proxy returning a login page for a failed/expired credential than an actual
+     * empty result.
      * @param data Response body.
      * @param endpoint Endpoint label for error context.
      * @returns The extracted values array, or [] when absent.
      */
     private extractValues<T>(data: unknown, endpoint: string): T[] {
-        if (data === undefined || data === null) {
+        if (data === undefined) {
             return [];
         }
-        if (typeof data !== 'object' || Array.isArray(data)) {
+        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
             const bodyHint = typeof data === 'string'
                 ? ' - received a string body, which may indicate an auth gateway returned a login page instead of a valid response'
-                : ` - received a ${typeof data} body`;
+                : ` - received a ${data === null ? 'null' : typeof data} body`;
             throw new HubClientError(0, `Unexpected response body from CALM Hub: expected an object with a "values" array${bodyHint}`, endpoint);
         }
         return (data as { values?: T[] }).values ?? [];
