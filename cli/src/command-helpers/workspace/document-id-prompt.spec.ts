@@ -116,4 +116,40 @@ describe('promptForDocumentId', () => {
         expect(validate('')).toMatch(/cannot be empty/);
         expect(validate('a/b')).toMatch(/cannot contain/);
     });
+
+    it('defaults the namespace from the environment when nothing is entered', async () => {
+        // inputs: baseUrl, version, namespace, mapping - namespace left empty so the default applies
+        queueAnswers(
+            ['namespace', 'architectures'],
+            ['https://hub.example.com', '1.0.0', undefined, 'my-arch']
+        );
+
+        const result = await promptForDocumentId({ namespaceDefault: 'trading-prod' });
+
+        expect(result.namespace).toBe('trading-prod');
+        expect(result.id).toBe('https://hub.example.com/calm/namespaces/trading-prod/architectures/my-arch/versions/1.0.0');
+    });
+
+    it('lets an explicit namespace answer override the environment default', async () => {
+        queueAnswers(
+            ['namespace', 'architectures'],
+            ['https://hub.example.com', '1.0.0', 'typed-by-hand', 'my-arch']
+        );
+
+        const result = await promptForDocumentId({ namespaceDefault: 'trading-prod' });
+
+        expect(result.namespace).toBe('typed-by-hand');
+    });
+
+    it('defaults the domain from the environment for control requirements', async () => {
+        // inputs: baseUrl, version, domain, controlName - domain left empty so the default applies
+        queueAnswers(
+            ['requirement'],
+            ['https://hub.example.com', '1.0.0', undefined, 'encryption']
+        );
+
+        const result = await promptForDocumentId({ domainDefault: 'security-prod' });
+
+        expect(result.id).toBe('https://hub.example.com/calm/domains/security-prod/controls/encryption/requirement/versions/1.0.0');
+    });
 });

@@ -190,7 +190,7 @@ export function setupWorkspaceCommands(program: Command) {
                     fileJson = undefined;
                 }
 
-                const baseUrlDefault = (await loadCliConfig())?.calmHubUrl;
+                const idDefaults = await documentIdDefaults(bundlePath);
                 const existingId = fileJson && typeof fileJson['$id'] === 'string' ? (fileJson['$id'] as string) : undefined;
                 let builtNamespace: string | undefined;
                 let effectiveId = existingId;
@@ -198,7 +198,7 @@ export function setupWorkspaceCommands(program: Command) {
                 if (fileJson) {
                     if (!existingId) {
                         // No $id present: build one interactively and write it into the file.
-                        const built = await promptForDocumentId({ baseUrlDefault });
+                        const built = await promptForDocumentId(idDefaults);
                         fileJson['$id'] = built.id;
                         await writeFile(srcPath, JSON.stringify(fileJson, null, 2), 'utf8');
                         logger.info(`Set document $id to ${built.id}`);
@@ -425,8 +425,7 @@ export function setupWorkspaceCommands(program: Command) {
                 }
                 const templates = await getTemplatesForType(type);
 
-                const baseUrlDefault = (await loadCliConfig())?.calmHubUrl;
-                const documentId = await promptForDocumentId({ baseUrlDefault });
+                const documentId = await promptForDocumentId(await documentIdDefaults(bundlePath));
 
                 name = await enforceOptionPresenceByPrompt(name, `Enter the title for your new ${type} document:`);
                 if (!template) {
@@ -683,6 +682,30 @@ function requireBundlePath(): string {
 /** Load and validate the repo's declared environments. Throws if none are declared or any is malformed. */
 async function loadEnvironments(gitRoot: string): Promise<EnvironmentMap> {
     return validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+}
+
+/**
+ * Prompt defaults for building a `$id`. When the bundle belongs to an environment, that environment
+ * supplies the base URL and any namespace/domain override, so new documents are authored into the
+ * right place instead of being corrected later.
+ */
+async function documentIdDefaults(bundlePath: string): Promise<{
+    baseUrlDefault?: string;
+    namespaceDefault?: string;
+    domainDefault?: string;
+}> {
+    const label = (await loadBundleMetadata(bundlePath))?.environment;
+    const gitRoot = findGitRoot(process.cwd());
+    if (label && gitRoot) {
+        const environments = await loadEnvironments(gitRoot);
+        const environment = resolveEnvironment(environments, label);
+        return {
+            baseUrlDefault: environment.url,
+            ...(environment.namespace ? { namespaceDefault: environment.namespace } : {}),
+            ...(environment.domain ? { domainDefault: environment.domain } : {}),
+        };
+    }
+    return { baseUrlDefault: (await loadCliConfig())?.calmHubUrl };
 }
 
 /**

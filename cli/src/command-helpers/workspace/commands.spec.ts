@@ -942,4 +942,39 @@ describe('setupWorkspaceCommands', () => {
         });
     });
 
+    describe('environment-aware $id defaults', () => {
+        it('add defaults the base URL and namespace from the bundle environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    baseUrlDefault: 'https://calm.corp',
+                    namespaceDefault: 'trading-prod',
+                })
+            );
+        });
+
+        it('add falls back to the CLI config base URL when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({ baseUrlDefault: 'https://calmhub.example.com' })
+            );
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.not.objectContaining({ namespaceDefault: expect.anything() })
+            );
+        });
+
+        it('new defaults the base URL and namespace from the bundle environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            await program.parseAsync(['node', 'test', 'workspace', 'new', 'architecture', 'My Arch', 'empty']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    baseUrlDefault: 'https://calm.corp',
+                    namespaceDefault: 'trading-prod',
+                })
+            );
+        });
+    });
+
 });

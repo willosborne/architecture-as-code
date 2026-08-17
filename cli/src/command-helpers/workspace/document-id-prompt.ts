@@ -22,8 +22,12 @@ export interface BuiltDocumentId {
 }
 
 export interface PromptForDocumentIdOptions {
-    /** Pre-filled default for the base URL prompt (typically the configured CalmHub URL). */
+    /** Pre-filled default for the base URL prompt (typically the environment or configured CalmHub URL). */
     baseUrlDefault?: string;
+    /** Pre-filled default for the namespace prompt (from the bundle's environment). */
+    namespaceDefault?: string;
+    /** Pre-filled default for the domain prompt (from the bundle's environment). */
+    domainDefault?: string;
     /** Default version (defaults to 1.0.0). */
     version?: string;
 }
@@ -38,8 +42,8 @@ function segmentValidator(label: string) {
     };
 }
 
-async function promptSegment(message: string, label: string): Promise<string> {
-    const value = await input({ message, validate: segmentValidator(label) });
+async function promptSegment(message: string, label: string, defaultValue?: string): Promise<string> {
+    const value = await input({ message, default: defaultValue, validate: segmentValidator(label) });
     return value.trim();
 }
 
@@ -79,7 +83,7 @@ export async function promptForDocumentId(opts: PromptForDocumentIdOptions = {})
     })).trim();
 
     if (scope === 'namespace') {
-        const namespace = await promptSegment('Namespace:', 'Namespace');
+        const namespace = await promptSegment('Namespace:', 'Namespace', opts.namespaceDefault);
         const type = await select<ResourceType>({
             message: 'Resource type:',
             choices: RESOURCE_TYPES.map((t) => ({ name: t, value: t as ResourceType })),
@@ -94,7 +98,7 @@ export async function promptForDocumentId(opts: PromptForDocumentIdOptions = {})
         return { id, namespace, slug: mapping };
     }
 
-    const domain = await promptSegment('Domain:', 'Domain');
+    const domain = await promptSegment('Domain:', 'Domain', opts.domainDefault);
     const controlName = await promptSegment('Control name:', 'Control name');
     const configName = scope === 'configuration'
         ? await promptSegment('Config name:', 'Config name')
