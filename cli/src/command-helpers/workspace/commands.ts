@@ -11,7 +11,7 @@ import { detectChangedResources, bumpWorkspace } from './bump';
 import { runPostBumpValidation } from './post-bump-validate';
 import { loadWorkspaceConfig } from './config';
 import { loadBundleMetadata, setBundleEnvironment } from './bundle-metadata';
-import { validateEnvironments, resolveEnvironment, describeEnvironment, EnvironmentMap } from './environment';
+import { validateEnvironments, resolveEnvironment, describeEnvironment, EnvironmentMap, WorkspaceEnvironment } from './environment';
 import { findWorkspaceManifestPath, findGitRoot } from '../../workspace-resolver';
 import { initLogger, Logger } from '@finos/calm-shared/src/logger';
 import { select, input } from '@inquirer/prompts';
@@ -20,7 +20,7 @@ import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/ca
 import { isConformantDocumentId, namespaceFromDocumentId } from '@finos/calm-shared/src/hub/document-id-utils';
 import { loadCliConfig } from '../../cli-config';
 import { resolveWorkspaceHub } from './hub-resolution';
-import { checkEnvironmentConsistency } from './environment-consistency';
+import { checkEnvironmentConsistency, describeInconsistency } from './environment-consistency';
 
 const logger: Logger = initLogger(false, 'workspace');
 
@@ -191,14 +191,16 @@ export function setupWorkspaceCommands(program: Command) {
                     fileJson = undefined;
                 }
 
-                const idDefaults = await documentIdDefaults(bundlePath);
                 const existingId = fileJson && typeof fileJson['$id'] === 'string' ? (fileJson['$id'] as string) : undefined;
                 let builtNamespace: string | undefined;
                 let effectiveId = existingId;
 
                 if (fileJson) {
                     if (!existingId) {
-                        // No $id present: build one interactively and write it into the file.
+                        // No $id present: build one interactively and write it into the file. Only
+                        // this path needs the environment's defaults, so only it pays for reading
+                        // config.json.
+                        const idDefaults = await documentIdDefaults(bundlePath);
                         const built = await promptForDocumentId(idDefaults);
                         fileJson['$id'] = built.id;
                         await writeFile(srcPath, JSON.stringify(fileJson, null, 2), 'utf8');
@@ -209,6 +211,20 @@ export function setupWorkspaceCommands(program: Command) {
                         // Non-conformant $id: warn but still add — push will skip non-pushable types anyway.
                         // Silently rewriting would be data loss for types that don't use CalmHub URLs (flow, adr, timeline, etc.).
                         logger.warn(`Document $id '${existingId}' is not a conformant CalmHub id. The document will be tracked but cannot be pushed to CalmHub.`);
+                    }
+
+                    // Warn (but still add) when the document's $id belongs to a different
+                    // environment than the bundle's own — most useful for an already-identified
+                    // document, since a freshly-built id is only ever wrong if the prompt defaults
+                    // were overridden.
+                    if (effectiveId) {
+                        const environment = await resolveBundleEnvironmentQuietly(bundlePath);
+                        if (environment) {
+                            const inconsistency = describeInconsistency(effectiveId, environment);
+                            if (inconsistency) {
+                                logger.warn(`Document $id '${effectiveId}' does not belong to this environment: ${inconsistency}`);
+                            }
+                        }
                     }
                 }
 
@@ -456,7 +472,7 @@ export function setupWorkspaceCommands(program: Command) {
         .description('Push all files in the current workspace manifest to CalmHub. Does not auto-bump; pushes the version each document declares.')
         .option('--calm-hub-url <url>', 'CalmHub base URL (overrides ~/.calm.json)')
         .option('--expect-environment <label>', 'Fail unless the active bundle belongs to this environment (CI guard)')
-        .option('--environment <label>', 'Not supported on push - see the error message')
+        .option('--environment <label>', 'Not supported here - use `calm workspace environment set <label>`')
         .option('--fail-if-modified', 'Fail if a modified document already exists in CalmHub at its declared version (overrides the workspace config; strict merge-time mode)')
         .action(async (options: { calmHubUrl?: string; expectEnvironment?: string; environment?: string; failIfModified?: boolean }) => {
             try {
@@ -495,16 +511,18 @@ export function setupWorkspaceCommands(program: Command) {
             try {
                 const bundlePath = requireBundlePath();
                 const gitRoot = findGitRoot(process.cwd());
-                const { calmHubOptions, environment } = await resolveHubAndAnnounce('Checking', bundlePath, gitRoot, {
+                const { calmHubOptions, bundleEnvironment } = await resolveHubAndAnnounce('Checking', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                     environmentOverride: options.environment,
                 });
-                const client = new CalmHubClient(calmHubOptions);
-                const changed = await detectChangedResources(bundlePath, client);
 
+                // Consistency is always asked of the bundle's own environment, never the
+                // `--environment` override: that flag only redirects where the hub round-trip
+                // below talks to. Checked first so a wholly-misplaced bundle fails in milliseconds
+                // rather than after N network calls.
                 let inconsistent = false;
-                if (environment) {
-                    const findings = await checkEnvironmentConsistency(bundlePath, environment);
+                if (bundleEnvironment) {
+                    const findings = await checkEnvironmentConsistency(bundlePath, bundleEnvironment);
                     if (findings.length > 0) {
                         inconsistent = true;
                         logger.error(`${findings.length} document(s) do not belong to this environment:`);
@@ -513,6 +531,9 @@ export function setupWorkspaceCommands(program: Command) {
                         }
                     }
                 }
+
+                const client = new CalmHubClient(calmHubOptions);
+                const changed = await detectChangedResources(bundlePath, client);
 
                 let needsBump = false;
                 if (changed.length === 0) {
@@ -560,7 +581,7 @@ export function setupWorkspaceCommands(program: Command) {
         .option('--minor', 'Apply a minor version bump to all changed documents (no prompts)')
         .option('--patch', 'Apply a patch version bump to all changed documents (no prompts)')
         .option('--inherit-change-type', 'Auto-inherit the bump type for cascade-bumped dependents without prompting')
-        .option('--environment <label>', 'Not supported on bump - see the error message')
+        .option('--environment <label>', 'Not supported here - use `calm workspace environment set <label>`')
         .action(async (options: { calmHubUrl?: string; major?: boolean; minor?: boolean; patch?: boolean; inheritChangeType?: boolean; environment?: string }) => {
             try {
                 if (options.environment) rejectEnvironmentOverride('bump');
@@ -710,6 +731,21 @@ async function loadEnvironments(gitRoot: string): Promise<EnvironmentMap> {
 }
 
 /**
+ * Resolve the bundle's own environment for a post-hoc check (e.g. `add`'s consistency warning),
+ * without any of the user-facing fallback messaging `documentIdDefaults` prints for prompting.
+ * Returns undefined whenever the environment can't be determined — no environment, no git root, or
+ * (for a bundle with no environment, the common case) nothing to resolve at all.
+ */
+async function resolveBundleEnvironmentQuietly(bundlePath: string): Promise<WorkspaceEnvironment | undefined> {
+    const label = (await loadBundleMetadata(bundlePath))?.environment;
+    if (!label) return undefined;
+    const gitRoot = findGitRoot(process.cwd());
+    if (!gitRoot) return undefined;
+    const environments = await loadEnvironments(gitRoot);
+    return resolveEnvironment(environments, label);
+}
+
+/**
  * Prompt defaults for building a `$id`. When the bundle belongs to an environment, that environment
  * supplies the base URL and any namespace/domain override, so new documents are authored into the
  * right place instead of being corrected later.
@@ -770,7 +806,7 @@ async function resolveHubAndAnnounce(
 function rejectEnvironmentOverride(command: string): never {
     throw new Error(
         `\`calm workspace ${command}\` does not accept --environment: it acts on the bundle's own environment. ` +
-        'Change it with `calm workspace environment set <label>`, or promote with `calm workspace migrate <environment>`.'
+        'Change it with `calm workspace environment set <label>`.'
     );
 }
 

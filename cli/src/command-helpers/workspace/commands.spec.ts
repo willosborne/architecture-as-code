@@ -53,12 +53,15 @@ const mocks = vi.hoisted(() => {
             calmHubOptions: { calmHubUrl: 'https://calm-dev.corp' },
             environmentLabel: 'dev',
             environment: { url: 'https://calm-dev.corp' },
+            bundleEnvironmentLabel: 'dev',
+            bundleEnvironment: { url: 'https://calm-dev.corp' },
         })),
         loggerInfo: vi.fn(),
         loggerWarn: vi.fn(),
         loggerError: vi.fn(),
         loggerDebug: vi.fn(),
         checkEnvironmentConsistency: vi.fn<() => Promise<Array<{ id: string; documentId: string; reason: string }>>>(async () => []),
+        describeInconsistency: vi.fn<(documentId: string, environment: unknown) => string | null>(() => null),
     };
 });
 
@@ -134,7 +137,10 @@ vi.mock('@finos/calm-shared/src/hub/document-id-utils', () => ({
 
 vi.mock('./hub-resolution', () => ({ resolveWorkspaceHub: mocks.resolveWorkspaceHub }));
 
-vi.mock('./environment-consistency', () => ({ checkEnvironmentConsistency: mocks.checkEnvironmentConsistency }));
+vi.mock('./environment-consistency', () => ({
+    checkEnvironmentConsistency: mocks.checkEnvironmentConsistency,
+    describeInconsistency: mocks.describeInconsistency,
+}));
 
 vi.mock('fs/promises', async (importOriginal) => {
     const actual = await importOriginal<typeof import('fs/promises')>();
@@ -329,6 +335,32 @@ describe('setupWorkspaceCommands', () => {
             expect(mocks.writeFile).not.toHaveBeenCalled();
             expect(exitSpy).not.toHaveBeenCalled();
             expect(mocks.addFileToBundle).toHaveBeenCalled();
+        });
+
+        it('warns when an existing $id belongs to another environment, but still adds the file', async () => {
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            mocks.describeInconsistency.mockReturnValueOnce('base URL is https://calmhub.example.com, expected https://calm-dev.corp');
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.describeInconsistency).toHaveBeenCalledWith(CONFORMANT_ID, { url: 'https://calm-dev.corp' });
+            expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining(
+                `Document $id '${CONFORMANT_ID}' does not belong to this environment: base URL is https://calmhub.example.com, expected https://calm-dev.corp`
+            ));
+            expect(exitSpy).not.toHaveBeenCalled();
+            expect(mocks.addFileToBundle).toHaveBeenCalled();
+        });
+
+        it('does not warn about environment mismatch when the $id is consistent', async () => {
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.loggerWarn).not.toHaveBeenCalledWith(expect.stringContaining('does not belong to this environment'));
+        });
+
+        it('does not check environment consistency when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.describeInconsistency).not.toHaveBeenCalled();
+            expect(mocks.loggerWarn).not.toHaveBeenCalledWith(expect.stringContaining('does not belong to this environment'));
         });
 
         it('should prompt for a manifest name when the file has no title field', async () => {
@@ -949,6 +981,11 @@ describe('setupWorkspaceCommands', () => {
             ).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
             expect(mocks.pushWorkspaceToHub).not.toHaveBeenCalled();
+            expect(mocks.loggerError).toHaveBeenCalledWith(expect.stringContaining(
+                '`calm workspace push` does not accept --environment: it acts on the bundle\'s own environment. ' +
+                'Change it with `calm workspace environment set <label>`.'
+            ));
+            expect(mocks.loggerError).not.toHaveBeenCalledWith(expect.stringContaining('migrate'));
         });
 
         it('check passes --environment through as an override', async () => {
@@ -956,6 +993,21 @@ describe('setupWorkspaceCommands', () => {
             expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
                 expect.objectContaining({ environmentOverride: 'prod' })
             );
+        });
+
+        it('check --environment checks consistency against the bundle\'s own environment, not the override, and does not exit 1 when consistent', async () => {
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calm.corp' },
+                environmentLabel: 'prod',
+                environment: { url: 'https://calm.corp', namespace: 'trading-prod' },
+                bundleEnvironmentLabel: 'dev',
+                bundleEnvironment: { url: 'https://calm-dev.corp' },
+            });
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([]);
+            mocks.detectChangedResources.mockResolvedValueOnce([]);
+            await program.parseAsync(['node', 'test', 'workspace', 'check', '--environment', 'prod']);
+            expect(mocks.checkEnvironmentConsistency).toHaveBeenCalledWith('/fake/bundle', { url: 'https://calm-dev.corp' });
+            expect(exitSpy).not.toHaveBeenCalled();
         });
 
         it('bump resolves its hub through resolveWorkspaceHub', async () => {
@@ -968,6 +1020,11 @@ describe('setupWorkspaceCommands', () => {
                 program.parseAsync(['node', 'test', 'workspace', 'bump', '--environment', 'prod'])
             ).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.loggerError).toHaveBeenCalledWith(expect.stringContaining(
+                '`calm workspace bump` does not accept --environment: it acts on the bundle\'s own environment. ' +
+                'Change it with `calm workspace environment set <label>`.'
+            ));
+            expect(mocks.loggerError).not.toHaveBeenCalledWith(expect.stringContaining('migrate'));
             expect(mocks.bumpWorkspace).not.toHaveBeenCalled();
         });
     });
