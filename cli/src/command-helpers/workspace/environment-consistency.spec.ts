@@ -1,8 +1,52 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import path from 'path';
-import { checkEnvironmentConsistency } from './environment-consistency';
+import { checkEnvironmentConsistency, describeInconsistency } from './environment-consistency';
 import { saveManifest } from './bundle';
+
+describe('describeInconsistency', () => {
+    it('returns null when the id matches the environment', () => {
+        expect(describeInconsistency(
+            'https://calm.corp/calm/namespaces/trading-prod/patterns/gateway/versions/1.0.0',
+            { url: 'https://calm.corp', namespace: 'trading-prod' }
+        )).toBeNull();
+    });
+
+    it('reports a base URL mismatch', () => {
+        const reason = describeInconsistency(
+            'https://calm-dev.corp/calm/namespaces/trading-prod/patterns/gateway/versions/1.0.0',
+            { url: 'https://calm.corp' }
+        );
+        expect(reason).toMatch(/base URL is https:\/\/calm-dev\.corp, expected https:\/\/calm\.corp/);
+    });
+
+    it('reports a namespace mismatch', () => {
+        const reason = describeInconsistency(
+            'https://calm.corp/calm/namespaces/trading-dev/patterns/gateway/versions/1.0.0',
+            { url: 'https://calm.corp', namespace: 'trading-prod' }
+        );
+        expect(reason).toMatch(/namespace is 'trading-dev', expected 'trading-prod'/);
+    });
+
+    it('reports a domain mismatch for control documents', () => {
+        const reason = describeInconsistency(
+            'https://calm.corp/calm/domains/security-dev/controls/encryption/requirement/versions/1.0.0',
+            { url: 'https://calm.corp', domain: 'security-prod' }
+        );
+        expect(reason).toMatch(/domain is 'security-dev', expected 'security-prod'/);
+    });
+
+    it('returns null for a non-conformant id', () => {
+        expect(describeInconsistency('adr-0007', { url: 'https://calm.corp' })).toBeNull();
+    });
+
+    it('ignores the namespace when the environment declares no override', () => {
+        expect(describeInconsistency(
+            'https://calm.corp/calm/namespaces/anything/patterns/gateway/versions/1.0.0',
+            { url: 'https://calm.corp' }
+        )).toBeNull();
+    });
+});
 
 describe('checkEnvironmentConsistency', () => {
     const bundlePath = path.join(__dirname, 'test-env-consistency');
