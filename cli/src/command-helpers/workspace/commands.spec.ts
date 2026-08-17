@@ -49,6 +49,11 @@ const mocks = vi.hoisted(() => {
         })),
         isConformantDocumentId: vi.fn(() => true),
         namespaceFromDocumentId: vi.fn(() => 'ns'),
+        resolveWorkspaceHub: vi.fn(async () => ({
+            calmHubOptions: { calmHubUrl: 'https://calm-dev.corp' },
+            environmentLabel: 'dev',
+            environment: { url: 'https://calm-dev.corp' },
+        })),
         loggerInfo: vi.fn(),
         loggerWarn: vi.fn(),
         loggerError: vi.fn(),
@@ -125,6 +130,8 @@ vi.mock('@finos/calm-shared/src/hub/document-id-utils', () => ({
     isConformantDocumentId: mocks.isConformantDocumentId,
     namespaceFromDocumentId: mocks.namespaceFromDocumentId,
 }));
+
+vi.mock('./hub-resolution', () => ({ resolveWorkspaceHub: mocks.resolveWorkspaceHub }));
 
 vi.mock('fs/promises', async (importOriginal) => {
     const actual = await importOriginal<typeof import('fs/promises')>();
@@ -580,8 +587,10 @@ describe('setupWorkspaceCommands', () => {
     describe('workspace push', () => {
         it('calls pushWorkspaceToHub with a CalmHubClient instance', async () => {
             await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            // calmHubOptions is whatever resolveWorkspaceHub resolves (mocked); see
+            // hub-resolution.spec.ts for the actual --calm-hub-url / environment precedence logic.
             expect(mocks.CalmHubClient).toHaveBeenCalledWith({
-                calmHubUrl: 'https://calmhub.example.com',
+                calmHubUrl: 'https://calm-dev.corp',
             });
             expect(mocks.pushWorkspaceToHub).toHaveBeenCalledWith(
                 '/fake/bundle',
@@ -619,20 +628,24 @@ describe('setupWorkspaceCommands', () => {
             );
         });
 
-        it('uses --calm-hub-url over the value from config', async () => {
+        it('passes --calm-hub-url through to resolveWorkspaceHub', async () => {
+            // The actual --calm-hub-url-over-config precedence is resolveWorkspaceHub's job
+            // (see hub-resolution.spec.ts); here we only prove push forwards the flag.
             await program.parseAsync(['node', 'test', 'workspace', 'push', '--calm-hub-url', 'https://override.example.com']);
-            expect(mocks.CalmHubClient).toHaveBeenCalledWith({
-                calmHubUrl: 'https://override.example.com',
-            });
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ calmHubUrl: 'https://override.example.com' })
+            );
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             await program.parseAsync(['node', 'test', 'workspace', 'push']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -642,8 +655,8 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
 
-        it('exits when no CalmHub URL is configured', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({} as never);
+        it('exits when hub resolution fails because no CalmHub URL is configured', async () => {
+            mocks.resolveWorkspaceHub.mockRejectedValueOnce(new Error('No CalmHub URL configured'));
             await expect(program.parseAsync(['node', 'test', 'workspace', 'push'])).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
@@ -663,14 +676,16 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).not.toHaveBeenCalled();
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             mocks.detectChangedResources.mockResolvedValueOnce([]);
             await program.parseAsync(['node', 'test', 'workspace', 'check']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -745,14 +760,16 @@ describe('setupWorkspaceCommands', () => {
             );
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             mocks.detectChangedResources.mockResolvedValueOnce([]);
             await program.parseAsync(['node', 'test', 'workspace', 'bump']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -871,6 +888,57 @@ describe('setupWorkspaceCommands', () => {
             expect(mocks.bumpWorkspace).toHaveBeenCalled();
             const callOptions = (mocks.bumpWorkspace.mock.calls[0] as unknown[])[2] as { getCascadeIncrement?: unknown };
             expect(callOptions.getCascadeIncrement).toBeUndefined();
+        });
+    });
+
+    describe('environment-aware hub resolution', () => {
+        it('push resolves its hub through resolveWorkspaceHub', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ bundlePath: '/fake/bundle', gitRoot: '/fake/repo' })
+            );
+        });
+
+        it('push passes --expect-environment through', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'push', '--expect-environment', 'prod']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ expectEnvironment: 'prod' })
+            );
+        });
+
+        it('push exits when hub resolution fails', async () => {
+            mocks.resolveWorkspaceHub.mockRejectedValueOnce(new Error('conflicts with environment'));
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'push'])).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.pushWorkspaceToHub).not.toHaveBeenCalled();
+        });
+
+        it('push rejects --environment with a pointer to the right command', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'push', '--environment', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.pushWorkspaceToHub).not.toHaveBeenCalled();
+        });
+
+        it('check passes --environment through as an override', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'check', '--environment', 'prod']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ environmentOverride: 'prod' })
+            );
+        });
+
+        it('bump resolves its hub through resolveWorkspaceHub', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'bump']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalled();
+        });
+
+        it('bump rejects --environment with a pointer to the right command', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'bump', '--environment', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.bumpWorkspace).not.toHaveBeenCalled();
         });
     });
 

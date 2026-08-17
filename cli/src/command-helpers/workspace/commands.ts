@@ -19,7 +19,7 @@ import { CALM_DOCUMENT_TYPES_LIST, isValidCalmDocumentType } from '@finos/calm-m
 import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/calm-hub-client';
 import { isConformantDocumentId, namespaceFromDocumentId } from '@finos/calm-shared/src/hub/document-id-utils';
 import { loadCliConfig } from '../../cli-config';
-import { resolveCalmHubOptions } from '../hub-commands';
+import { resolveWorkspaceHub } from './hub-resolution';
 
 const logger: Logger = initLogger(false, 'workspace');
 
@@ -449,16 +449,18 @@ export function setupWorkspaceCommands(program: Command) {
         .command('push')
         .description('Push all files in the current workspace manifest to CalmHub. Does not auto-bump; pushes the version each document declares.')
         .option('--calm-hub-url <url>', 'CalmHub base URL (overrides ~/.calm.json)')
+        .option('--expect-environment <label>', 'Fail unless the active bundle belongs to this environment (CI guard)')
+        .option('--environment <label>', 'Not supported on push - see the error message')
         .option('--fail-if-modified', 'Fail if a modified document already exists in CalmHub at its declared version (overrides the workspace config; strict merge-time mode)')
-        .action(async (options: { calmHubUrl?: string; failIfModified?: boolean }) => {
+        .action(async (options: { calmHubUrl?: string; expectEnvironment?: string; environment?: string; failIfModified?: boolean }) => {
             try {
-                const bundlePath = findWorkspaceManifestPath(process.cwd());
-                if (!bundlePath) {
-                    logger.error('No CALM workspace bundle found. Create one with `calm workspace init <name>`');
-                    process.exit(1);
-                }
+                if (options.environment) rejectEnvironmentOverride('push');
+                const bundlePath = requireBundlePath();
 
-                const calmHubOptions = await resolveCalmHubOptions({ calmHubUrl: options.calmHubUrl });
+                const { calmHubOptions } = await resolveHubAndAnnounce('Pushing', bundlePath, {
+                    calmHubUrl: options.calmHubUrl,
+                    expectEnvironment: options.expectEnvironment,
+                });
 
                 const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
@@ -476,15 +478,14 @@ export function setupWorkspaceCommands(program: Command) {
         .command('check')
         .description('Check whether any tracked documents have changed on disk relative to CalmHub and need a version bump. Exits non-zero if so (CI/PR gate).')
         .option('--calm-hub-url <url>', 'CalmHub base URL (overrides ~/.calm.json)')
-        .action(async (options: { calmHubUrl?: string }) => {
+        .option('--environment <label>', 'Check against this environment instead of the bundle\'s own (read-only)')
+        .action(async (options: { calmHubUrl?: string; environment?: string }) => {
             try {
-                const bundlePath = findWorkspaceManifestPath(process.cwd());
-                if (!bundlePath) {
-                    logger.error('No CALM workspace bundle found. Create one with `calm workspace init <name>`');
-                    process.exit(1);
-                }
-
-                const calmHubOptions = await resolveCalmHubOptions({ calmHubUrl: options.calmHubUrl });
+                const bundlePath = requireBundlePath();
+                const { calmHubOptions } = await resolveHubAndAnnounce('Checking', bundlePath, {
+                    calmHubUrl: options.calmHubUrl,
+                    environmentOverride: options.environment,
+                });
                 const client = new CalmHubClient(calmHubOptions);
                 const changed = await detectChangedResources(bundlePath, client);
 
@@ -534,20 +535,20 @@ export function setupWorkspaceCommands(program: Command) {
         .option('--minor', 'Apply a minor version bump to all changed documents (no prompts)')
         .option('--patch', 'Apply a patch version bump to all changed documents (no prompts)')
         .option('--inherit-change-type', 'Auto-inherit the bump type for cascade-bumped dependents without prompting')
-        .action(async (options: { calmHubUrl?: string; major?: boolean; minor?: boolean; patch?: boolean; inheritChangeType?: boolean }) => {
+        .option('--environment <label>', 'Not supported on bump - see the error message')
+        .action(async (options: { calmHubUrl?: string; major?: boolean; minor?: boolean; patch?: boolean; inheritChangeType?: boolean; environment?: string }) => {
             try {
-                const bundlePath = findWorkspaceManifestPath(process.cwd());
-                if (!bundlePath) {
-                    logger.error('No CALM workspace bundle found. Create one with `calm workspace init <name>`');
-                    process.exit(1);
-                }
+                if (options.environment) rejectEnvironmentOverride('bump');
+                const bundlePath = requireBundlePath();
 
                 if ([options.major, options.minor, options.patch].filter(Boolean).length > 1) {
                     logger.error('Cannot use --major, --minor and --patch together.');
                     process.exit(1);
                 }
 
-                const calmHubOptions = await resolveCalmHubOptions({ calmHubUrl: options.calmHubUrl });
+                const { calmHubOptions } = await resolveHubAndAnnounce('Bumping', bundlePath, {
+                    calmHubUrl: options.calmHubUrl,
+                });
 
                 const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
@@ -681,5 +682,39 @@ function requireBundlePath(): string {
 /** Load and validate the repo's declared environments. Throws if none are declared or any is malformed. */
 async function loadEnvironments(gitRoot: string): Promise<EnvironmentMap> {
     return validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+}
+
+/**
+ * Resolve the hub for a workspace command and announce the target, so an unexpected environment is
+ * visible at the moment it matters rather than after the fact.
+ */
+async function resolveHubAndAnnounce(
+    action: string,
+    bundlePath: string,
+    options: { calmHubUrl?: string; environmentOverride?: string; expectEnvironment?: string }
+) {
+    const resolution = await resolveWorkspaceHub({
+        bundlePath,
+        gitRoot: findGitRoot(process.cwd()),
+        calmHubUrl: options.calmHubUrl,
+        environmentOverride: options.environmentOverride,
+        expectEnvironment: options.expectEnvironment,
+    });
+
+    const bundleName = path.basename(bundlePath);
+    const target = resolution.environmentLabel
+        ? `${resolution.environmentLabel} -> ${resolution.calmHubOptions.calmHubUrl}`
+        : `${resolution.calmHubOptions.calmHubUrl}`;
+    logger.info(`${action} bundle '${bundleName}' (${target})`);
+
+    return resolution;
+}
+
+/** `--environment` is accepted only on read-only or explicitly-targeted commands. */
+function rejectEnvironmentOverride(command: string): never {
+    throw new Error(
+        `\`calm workspace ${command}\` does not accept --environment: it acts on the bundle's own environment. ` +
+        'Change it with `calm workspace environment set <label>`, or promote with `calm workspace migrate <environment>`.'
+    );
 }
 
