@@ -49,6 +49,10 @@ const mocks = vi.hoisted(() => {
         })),
         isConformantDocumentId: vi.fn(() => true),
         namespaceFromDocumentId: vi.fn(() => 'ns'),
+        loggerInfo: vi.fn(),
+        loggerWarn: vi.fn(),
+        loggerError: vi.fn(),
+        loggerDebug: vi.fn(),
     };
 });
 
@@ -134,10 +138,10 @@ vi.mock('@inquirer/prompts', () => ({
 
 vi.mock('@finos/calm-shared/src/logger', () => ({
     initLogger: () => ({
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
+        info: mocks.loggerInfo,
+        warn: mocks.loggerWarn,
+        error: mocks.loggerError,
+        debug: mocks.loggerDebug,
     }),
 }));
 
@@ -243,9 +247,17 @@ describe('setupWorkspaceCommands', () => {
         });
 
         it('list does not attribute a bundle with no environment to any label', async () => {
+            // listWorkspaces (default mock) returns ['default', 'other']; 'default' has no
+            // environment and must not show up in any environment's bundle list, while 'other'
+            // (which does) must show up under the label it actually reports.
             mocks.loadBundleMetadata.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ environment: 'dev' });
             await program.parseAsync(['node', 'test', 'workspace', 'environment', 'list']);
-            expect(mocks.loadBundleMetadata).toHaveBeenCalledTimes(2);
+
+            const loggedLines = mocks.loggerInfo.mock.calls.map((call) => call[0] as string);
+            const bundleLine = loggedLines.find((line) => line.includes('bundles:'));
+            expect(bundleLine).toContain('other');
+            expect(bundleLine).not.toContain('default');
+            expect(loggedLines.some((line) => line.includes('default'))).toBe(false);
         });
 
         it('show resolves a named environment', async () => {

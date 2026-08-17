@@ -11,7 +11,7 @@ import { detectChangedResources, bumpWorkspace } from './bump';
 import { runPostBumpValidation } from './post-bump-validate';
 import { loadWorkspaceConfig } from './config';
 import { loadBundleMetadata, setBundleEnvironment } from './bundle-metadata';
-import { validateEnvironments, resolveEnvironment, describeEnvironment } from './environment';
+import { validateEnvironments, resolveEnvironment, describeEnvironment, EnvironmentMap } from './environment';
 import { findWorkspaceManifestPath, findGitRoot } from '../../workspace-resolver';
 import { initLogger, Logger } from '@finos/calm-shared/src/logger';
 import { select, input } from '@inquirer/prompts';
@@ -43,8 +43,7 @@ export function setupWorkspaceCommands(program: Command) {
             try {
                 // Validate the label before creating anything, so a typo does not leave a bundle behind.
                 if (options.environment) {
-                    const config = await loadWorkspaceConfig(targetDir);
-                    resolveEnvironment(validateEnvironments(config.environments), options.environment);
+                    resolveEnvironment(await loadEnvironments(targetDir), options.environment);
                 }
 
                 const created = await ensureWorkspaceBundle(targetDir, workspaceName);
@@ -71,7 +70,7 @@ export function setupWorkspaceCommands(program: Command) {
                     logger.info('This workspace bundle has no environment. Set one with `calm workspace environment set <label>`.');
                     return;
                 }
-                const environments = validateEnvironments((await loadWorkspaceConfig(requireGitRoot())).environments);
+                const environments = await loadEnvironments(requireGitRoot());
                 logger.info(describeEnvironment(label, resolveEnvironment(environments, label)));
             } catch (err) {
                 logger.error('Failed to read the workspace environment: ' + (err instanceof Error ? err.message : String(err)));
@@ -85,7 +84,7 @@ export function setupWorkspaceCommands(program: Command) {
         .action(async () => {
             try {
                 const gitRoot = requireGitRoot();
-                const environments = validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+                const environments = await loadEnvironments(gitRoot);
 
                 // Map each environment to the bundles that belong to it, so `list` answers
                 // "who is pointing at prod?" without inspecting every bundle by hand.
@@ -119,7 +118,7 @@ export function setupWorkspaceCommands(program: Command) {
                     process.exit(1);
                     return;
                 }
-                const environments = validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+                const environments = await loadEnvironments(gitRoot);
                 logger.info(describeEnvironment(resolvedLabel, resolveEnvironment(environments, resolvedLabel)));
             } catch (err) {
                 logger.error('Failed to show environment: ' + (err instanceof Error ? err.message : String(err)));
@@ -134,7 +133,7 @@ export function setupWorkspaceCommands(program: Command) {
         .action(async (label: string) => {
             try {
                 const bundlePath = requireBundlePath();
-                const environments = validateEnvironments((await loadWorkspaceConfig(requireGitRoot())).environments);
+                const environments = await loadEnvironments(requireGitRoot());
                 const environment = resolveEnvironment(environments, label);
                 await setBundleEnvironment(bundlePath, label);
                 logger.info(`Workspace bundle now belongs to ${describeEnvironment(label, environment)}`);
@@ -677,5 +676,10 @@ function requireBundlePath(): string {
         throw new Error('No CALM workspace bundle found. Create one with `calm workspace init <name>`');
     }
     return bundlePath;
+}
+
+/** Load and validate the repo's declared environments. Throws if none are declared or any is malformed. */
+async function loadEnvironments(gitRoot: string): Promise<EnvironmentMap> {
+    return validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
 }
 
