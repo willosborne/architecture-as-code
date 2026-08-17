@@ -47,6 +47,9 @@ describe('resolveWorkspaceHub', () => {
         expect(result.calmHubOptions.calmHubUrl).toBe('https://calm.corp');
         expect(result.environmentLabel).toBe('prod');
         expect(result.environment).toEqual({ url: 'https://calm.corp', namespace: 'trading-prod' });
+        // With no override, the bundle's own environment is the same as the resolved one.
+        expect(result.bundleEnvironmentLabel).toBe('prod');
+        expect(result.bundleEnvironment).toEqual({ url: 'https://calm.corp', namespace: 'trading-prod' });
     });
 
     it('accepts a --calm-hub-url that agrees with the environment, ignoring a trailing slash', async () => {
@@ -66,6 +69,23 @@ describe('resolveWorkspaceHub', () => {
         const result = await resolveWorkspaceHub({ ...base, environmentOverride: 'prod' });
         expect(result.calmHubOptions.calmHubUrl).toBe('https://calm.corp');
         expect(result.environmentLabel).toBe('prod');
+    });
+
+    it('carries both the override\'s environment and the bundle\'s own', async () => {
+        mocks.loadBundleMetadata.mockResolvedValue({ environment: 'dev' });
+        const result = await resolveWorkspaceHub({ ...base, environmentOverride: 'prod' });
+        expect(result.environmentLabel).toBe('prod');
+        expect(result.environment).toEqual({ url: 'https://calm.corp', namespace: 'trading-prod' });
+        expect(result.bundleEnvironmentLabel).toBe('dev');
+        expect(result.bundleEnvironment).toEqual({ url: 'https://calm-dev.corp' });
+    });
+
+    it('leaves bundleEnvironment undefined when the override is given but the bundle itself has no environment', async () => {
+        mocks.loadBundleMetadata.mockResolvedValue(undefined);
+        const result = await resolveWorkspaceHub({ ...base, environmentOverride: 'prod' });
+        expect(result.environmentLabel).toBe('prod');
+        expect(result.bundleEnvironmentLabel).toBeUndefined();
+        expect(result.bundleEnvironment).toBeUndefined();
     });
 
     it('errors for an unknown environment label', async () => {

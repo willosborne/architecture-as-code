@@ -22,6 +22,15 @@ export interface WorkspaceHubResolution {
     /** The environment in play, if any — the override when given, otherwise the bundle's own. */
     environmentLabel?: string;
     environment?: WorkspaceEnvironment;
+    /**
+     * The bundle's own environment label, regardless of any `--environment` override. Consistency
+     * checks (does this bundle's documents belong where they claim?) must always be asked against
+     * this, never against the override — the override only redirects where the hub half of a
+     * command talks to.
+     */
+    bundleEnvironmentLabel?: string;
+    /** The bundle's own environment, resolved from config, regardless of any override. */
+    bundleEnvironment?: WorkspaceEnvironment;
 }
 
 /**
@@ -51,12 +60,17 @@ export async function resolveWorkspaceHub(options: ResolveWorkspaceHubOptions): 
     const label = options.environmentOverride ?? bundleLabel;
 
     let environment: WorkspaceEnvironment | undefined;
+    let bundleEnvironment: WorkspaceEnvironment | undefined;
     if (label) {
         if (!options.gitRoot) {
             throw new Error(`Cannot resolve environment '${label}': no git repository found.`);
         }
         const config = await loadWorkspaceConfig(options.gitRoot);
-        environment = resolveEnvironment(validateEnvironments(config.environments), label);
+        const environments = validateEnvironments(config.environments);
+        environment = resolveEnvironment(environments, label);
+        if (bundleLabel) {
+            bundleEnvironment = bundleLabel === label ? environment : resolveEnvironment(environments, bundleLabel);
+        }
     }
 
     if (environment && options.calmHubUrl && normaliseUrl(options.calmHubUrl) !== normaliseUrl(environment.url)) {
@@ -67,5 +81,5 @@ export async function resolveWorkspaceHub(options: ResolveWorkspaceHubOptions): 
     }
 
     const calmHubOptions = await resolveCalmHubOptions({ calmHubUrl: options.calmHubUrl ?? environment?.url });
-    return { calmHubOptions, environmentLabel: label, environment };
+    return { calmHubOptions, environmentLabel: label, environment, bundleEnvironmentLabel: bundleLabel, bundleEnvironment };
 }
