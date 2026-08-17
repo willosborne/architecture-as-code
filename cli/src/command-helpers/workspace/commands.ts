@@ -456,13 +456,13 @@ export function setupWorkspaceCommands(program: Command) {
             try {
                 if (options.environment) rejectEnvironmentOverride('push');
                 const bundlePath = requireBundlePath();
+                const gitRoot = findGitRoot(process.cwd());
 
-                const { calmHubOptions } = await resolveHubAndAnnounce('Pushing', bundlePath, {
+                const { calmHubOptions } = await resolveHubAndAnnounce('Pushing', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                     expectEnvironment: options.expectEnvironment,
                 });
 
-                const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
                 const failIfModified = options.failIfModified ?? workspaceConfig?.push.failIfModified ?? false;
 
@@ -482,7 +482,8 @@ export function setupWorkspaceCommands(program: Command) {
         .action(async (options: { calmHubUrl?: string; environment?: string }) => {
             try {
                 const bundlePath = requireBundlePath();
-                const { calmHubOptions } = await resolveHubAndAnnounce('Checking', bundlePath, {
+                const gitRoot = findGitRoot(process.cwd());
+                const { calmHubOptions } = await resolveHubAndAnnounce('Checking', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                     environmentOverride: options.environment,
                 });
@@ -546,11 +547,11 @@ export function setupWorkspaceCommands(program: Command) {
                     process.exit(1);
                 }
 
-                const { calmHubOptions } = await resolveHubAndAnnounce('Bumping', bundlePath, {
+                const gitRoot = findGitRoot(process.cwd());
+                const { calmHubOptions } = await resolveHubAndAnnounce('Bumping', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                 });
 
-                const gitRoot = findGitRoot(process.cwd());
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
                 const defaultIncrement: ResourceChangeType =
                     options.major ? 'MAJOR' : options.minor ? 'MINOR' : options.patch ? 'PATCH' : workspaceConfig?.bump.defaultIncrement ?? 'MINOR';
@@ -691,11 +692,12 @@ async function loadEnvironments(gitRoot: string): Promise<EnvironmentMap> {
 async function resolveHubAndAnnounce(
     action: string,
     bundlePath: string,
+    gitRoot: string | null,
     options: { calmHubUrl?: string; environmentOverride?: string; expectEnvironment?: string }
 ) {
     const resolution = await resolveWorkspaceHub({
         bundlePath,
-        gitRoot: findGitRoot(process.cwd()),
+        gitRoot,
         calmHubUrl: options.calmHubUrl,
         environmentOverride: options.environmentOverride,
         expectEnvironment: options.expectEnvironment,
