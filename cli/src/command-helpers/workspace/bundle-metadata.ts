@@ -1,6 +1,9 @@
 import path from 'path';
 import { readFile, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
+import { initLogger, Logger } from '@finos/calm-shared/src/logger';
+
+const logger: Logger = initLogger(false, 'workspace');
 
 export const BUNDLE_METADATA_FILENAME = 'bundle.json';
 
@@ -22,17 +25,37 @@ function metadataPath(bundlePath: string): string {
 /**
  * Load a bundle's metadata. Returns undefined when the file is absent, unreadable or invalid —
  * "no environment" is a supported state, so a bad file must not break unrelated commands.
+ *
+ * The absent-file case is silent: that is the normal, supported state for every bundle that
+ * predates this feature. A file that exists but is corrupt, or that parses but carries a malformed
+ * `environment`, is a different problem — one that would otherwise silently disable the
+ * environment guard — so those cases log a warning even though they still return undefined /
+ * a metadata object with `environment` stripped.
  */
 export async function loadBundleMetadata(bundlePath: string): Promise<BundleMetadata | undefined> {
     const filePath = metadataPath(bundlePath);
     if (!existsSync(filePath)) return undefined;
+
+    let parsed: unknown;
     try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8')) as unknown;
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-        return parsed as BundleMetadata;
+        parsed = JSON.parse(await readFile(filePath, 'utf8'));
     } catch {
+        logger.warn(`${filePath} is not valid JSON and will be ignored. This bundle's environment cannot be read.`);
         return undefined;
     }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        logger.warn(`${filePath} does not contain a JSON object and will be ignored. This bundle's environment cannot be read.`);
+        return undefined;
+    }
+
+    const metadata = parsed as BundleMetadata;
+    if (metadata.environment !== undefined && typeof metadata.environment !== 'string') {
+        logger.warn(`${filePath} has a non-string 'environment' and will be treated as having none.`);
+        return { ...metadata, environment: undefined };
+    }
+
+    return metadata;
 }
 
 export async function saveBundleMetadata(bundlePath: string, metadata: BundleMetadata): Promise<void> {

@@ -1,7 +1,21 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { mkdir, writeFile, rm, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+
+const mocks = vi.hoisted(() => ({
+    loggerWarn: vi.fn(),
+}));
+
+vi.mock('@finos/calm-shared/src/logger', () => ({
+    initLogger: () => ({
+        info: vi.fn(),
+        warn: mocks.loggerWarn,
+        error: vi.fn(),
+        debug: vi.fn(),
+    }),
+}));
+
 import {
     BUNDLE_METADATA_FILENAME,
     loadBundleMetadata,
@@ -17,19 +31,42 @@ describe('bundle metadata', () => {
     beforeEach(async () => {
         await rm(gitRoot, { recursive: true, force: true });
         await mkdir(bundlePath, { recursive: true });
+        mocks.loggerWarn.mockClear();
     });
 
     afterAll(async () => {
         await rm(gitRoot, { recursive: true, force: true });
     });
 
-    it('returns undefined when bundle.json is absent', async () => {
+    it('returns undefined when bundle.json is absent, and stays completely silent', async () => {
         expect(await loadBundleMetadata(bundlePath)).toBeUndefined();
+        expect(mocks.loggerWarn).not.toHaveBeenCalled();
     });
 
-    it('returns undefined when bundle.json is invalid JSON', async () => {
+    it('returns undefined and warns when bundle.json is invalid JSON', async () => {
         await writeFile(path.join(bundlePath, BUNDLE_METADATA_FILENAME), 'not json {{{', 'utf8');
         expect(await loadBundleMetadata(bundlePath)).toBeUndefined();
+        expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('not valid JSON'));
+    });
+
+    it('returns undefined and warns when bundle.json parses to a non-object', async () => {
+        await writeFile(path.join(bundlePath, BUNDLE_METADATA_FILENAME), '[1, 2, 3]', 'utf8');
+        expect(await loadBundleMetadata(bundlePath)).toBeUndefined();
+        expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('does not contain a JSON object'));
+    });
+
+    it('treats a misspelled environment as absent but preserves other fields, and warns', async () => {
+        await writeFile(path.join(bundlePath, BUNDLE_METADATA_FILENAME), JSON.stringify({ enviroment: 'dev' }), 'utf8');
+        const metadata = await loadBundleMetadata(bundlePath);
+        expect(metadata?.environment).toBeUndefined();
+        expect(mocks.loggerWarn).not.toHaveBeenCalled();
+    });
+
+    it('warns and treats environment as absent when it is not a string', async () => {
+        await writeFile(path.join(bundlePath, BUNDLE_METADATA_FILENAME), JSON.stringify({ environment: 123, promotedFrom: 'trading' }), 'utf8');
+        const metadata = await loadBundleMetadata(bundlePath);
+        expect(metadata).toEqual({ promotedFrom: 'trading', environment: undefined });
+        expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('non-string \'environment\''));
     });
 
     it('round-trips metadata through save and load', async () => {
