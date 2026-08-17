@@ -277,11 +277,9 @@ export function setupWorkspaceCommands(program: Command) {
                 }
                 logger.info('Available workspaces:');
                 for (const ws of workspaces) {
-                    if (ws === activeWorkspace) {
-                        logger.info(`* ${ws}`);
-                    } else {
-                        logger.info(`  ${ws}`);
-                    }
+                    const label = (await loadBundleMetadata(getWorkspaceBundlePath(gitRoot, ws)))?.environment;
+                    const suffix = label ? ` (${label})` : '';
+                    logger.info(`${ws === activeWorkspace ? '*' : ' '} ${ws}${suffix}`);
                 }
             } catch (err) {
                 logger.error('Failed to list workspaces: ' + (err instanceof Error ? err.message : String(err)));
@@ -307,6 +305,13 @@ export function setupWorkspaceCommands(program: Command) {
                 logger.info(activeWorkspace);
                 const bundlePath = findWorkspaceManifestPath(process.cwd());
                 if (bundlePath) {
+                    const label = (await loadBundleMetadata(bundlePath))?.environment;
+                    if (label) {
+                        const environments = await loadEnvironments(gitRoot);
+                        logger.info(`Environment: ${describeEnvironment(label, resolveEnvironment(environments, label))}`);
+                    } else {
+                        logger.info('Environment: none');
+                    }
                     const manifest = await loadManifest(bundlePath);
                     const keys = Object.keys(manifest);
                     if (keys.length > 0) {
@@ -367,7 +372,8 @@ export function setupWorkspaceCommands(program: Command) {
                     process.exit(1);
                 }
                 await setActiveWorkspace(gitRoot, name);
-                logger.info(`Switched to workspace '${name}'.`);
+                const label = (await loadBundleMetadata(getWorkspaceBundlePath(gitRoot, name)))?.environment;
+                logger.info(`Switched to workspace '${name}'${label ? ` (${label})` : ''}.`);
             } catch (err) {
                 logger.error('Failed to switch workspace: ' + (err instanceof Error ? err.message : String(err)));
                 process.exit(1);

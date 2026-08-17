@@ -1020,4 +1020,40 @@ describe('setupWorkspaceCommands', () => {
         });
     });
 
+    describe('environment annotations', () => {
+        it('list reads each bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'list']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledTimes(2); // 'default' and 'other'
+        });
+
+        it('list still works when a bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'list']);
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('show reads the active bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'show']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledWith('/fake/bundle');
+        });
+
+        it('show reports no environment when the active bundle has none', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'show']);
+            expect(mocks.loggerInfo).toHaveBeenCalledWith('Environment: none');
+        });
+
+        it('switch reads the target bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'switch', 'other']);
+            expect(mocks.setActiveWorkspace).toHaveBeenCalledWith('/fake/repo', 'other');
+            expect(mocks.loadBundleMetadata).toHaveBeenCalled();
+        });
+
+        it('switch announces without a suffix when the target bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'switch', 'other']);
+            expect(mocks.loggerInfo).toHaveBeenCalledWith('Switched to workspace \'other\'.');
+        });
+    });
+
 });
