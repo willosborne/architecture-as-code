@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
         setActiveWorkspace: vi.fn(async () => { }),
         cleanWorkspaceBundle: vi.fn(async () => { }),
         cleanAllWorkspaces: vi.fn(async () => { }),
+        getWorkspaceBundlePath: vi.fn((gitRoot: string, workspaceName: string) => `${gitRoot}/.calm-workspace/bundles/${workspaceName}`),
         addFileToBundle: vi.fn(async () => ({ id: 'test-doc', destPath: '/fake/bundle/files/test.json', rel: 'files/test.json' })),
         printBundleTree: vi.fn(async () => { }),
         createNewDocument: vi.fn(async () => '/fake/repo/com.example-architecture-my-arch.json'),
@@ -18,9 +19,18 @@ const mocks = vi.hoisted(() => {
         detectChangedResources: vi.fn(async () => []),
         bumpWorkspace: vi.fn(async () => ({ bumped: [], refUpdates: [] })),
         runPostBumpValidation: vi.fn(async () => []),
-        loadWorkspaceConfig: vi.fn(async () => ({ push: { failIfModified: false }, bump: { defaultIncrement: 'MINOR' } })),
+        loadWorkspaceConfig: vi.fn(async () => ({
+            push: { failIfModified: false },
+            bump: { defaultIncrement: 'MINOR' },
+            environments: {
+                dev: { url: 'https://calm-dev.corp' },
+                prod: { url: 'https://calm.corp', namespace: 'trading-prod' },
+            },
+        })),
         findWorkspaceManifestPath: vi.fn<() => string | null>(() => '/fake/bundle'),
         findGitRoot: vi.fn<() => string | null>(() => '/fake/repo'),
+        loadBundleMetadata: vi.fn<() => Promise<{ environment?: string } | undefined>>(async () => ({ environment: 'dev' })),
+        setBundleEnvironment: vi.fn(async () => { }),
         loadManifest: vi.fn(async () => ({})),
         removeDocumentFromManifest: vi.fn(async () => true),
         loadCliConfig: vi.fn(async () => ({ calmHubUrl: 'https://calmhub.example.com' })),
@@ -49,6 +59,7 @@ vi.mock('./workspace', () => ({
     setActiveWorkspace: mocks.setActiveWorkspace,
     cleanWorkspaceBundle: mocks.cleanWorkspaceBundle,
     cleanAllWorkspaces: mocks.cleanAllWorkspaces,
+    getWorkspaceBundlePath: mocks.getWorkspaceBundlePath,
 }));
 
 vi.mock('./bundle', () => ({
@@ -81,6 +92,11 @@ vi.mock('./post-bump-validate', () => ({
 
 vi.mock('./config', () => ({
     loadWorkspaceConfig: mocks.loadWorkspaceConfig,
+}));
+
+vi.mock('./bundle-metadata', () => ({
+    loadBundleMetadata: mocks.loadBundleMetadata,
+    setBundleEnvironment: mocks.setBundleEnvironment,
 }));
 
 vi.mock('../../workspace-resolver', () => ({
@@ -162,6 +178,97 @@ describe('setupWorkspaceCommands', () => {
             mocks.ensureWorkspaceBundle.mockRejectedValueOnce(new Error('init failed'));
             await expect(program.parseAsync(['node', 'test', 'workspace', 'init', 'ws'])).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+    });
+
+    describe('workspace init --environment', () => {
+        it('sets the bundle environment when the label is declared', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws', '--environment', 'prod']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', 'prod');
+        });
+
+        it('does not touch bundle.json when no environment is given', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws']);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('exits when the label is not declared', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws', '--environment', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('workspace environment', () => {
+        it('set records the environment on the active bundle', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'prod']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', 'prod');
+        });
+
+        it('set exits for an undeclared label', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('set exits when no workspace bundle found', async () => {
+            mocks.findWorkspaceManifestPath.mockReturnValueOnce(null);
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('unset clears the environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'unset']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', undefined);
+        });
+
+        it('list reads the declared environments from config', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'list']);
+            expect(mocks.loadWorkspaceConfig).toHaveBeenCalledWith('/fake/repo');
+        });
+
+        it('list exits when no git root found', async () => {
+            mocks.findGitRoot.mockReturnValueOnce(null);
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'list'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('list does not attribute a bundle with no environment to any label', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ environment: 'dev' });
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'list']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledTimes(2);
+        });
+
+        it('show resolves a named environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'show', 'prod']);
+            expect(mocks.loadWorkspaceConfig).toHaveBeenCalledWith('/fake/repo');
+        });
+
+        it('show exits for an undeclared label', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'show', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('with no subcommand reports the active bundle environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledWith('/fake/bundle');
+        });
+
+        it('with no subcommand does not fail when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'environment']);
+            expect(exitSpy).not.toHaveBeenCalled();
         });
     });
 

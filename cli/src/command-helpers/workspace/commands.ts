@@ -1,7 +1,7 @@
 import { Argument, Command, Option } from 'commander';
 import path from 'path';
 import { readFile, writeFile } from 'fs/promises';
-import { ensureWorkspaceBundle, getActiveWorkspace, listWorkspaces, setActiveWorkspace, cleanWorkspaceBundle, cleanAllWorkspaces } from './workspace';
+import { ensureWorkspaceBundle, getActiveWorkspace, listWorkspaces, setActiveWorkspace, cleanWorkspaceBundle, cleanAllWorkspaces, getWorkspaceBundlePath } from './workspace';
 import { addFileToBundle, loadManifest, printBundleTree } from './bundle';
 import { removeDocumentFromManifest } from './rm';
 import { createNewDocument, getTemplatesForType } from './new';
@@ -10,6 +10,8 @@ import { pushWorkspaceToHub } from './push';
 import { detectChangedResources, bumpWorkspace } from './bump';
 import { runPostBumpValidation } from './post-bump-validate';
 import { loadWorkspaceConfig } from './config';
+import { loadBundleMetadata, setBundleEnvironment } from './bundle-metadata';
+import { validateEnvironments, resolveEnvironment, describeEnvironment } from './environment';
 import { findWorkspaceManifestPath, findGitRoot } from '../../workspace-resolver';
 import { initLogger, Logger } from '@finos/calm-shared/src/logger';
 import { select, input } from '@inquirer/prompts';
@@ -33,16 +35,125 @@ export function setupWorkspaceCommands(program: Command) {
         .description('Initialize or update CALM workspace in a repository')
         .argument('<name>', 'The name of the workspace to create or update')
         .option('--dir <path>', 'Directory in which to create the workspace (defaults to git root)')
-        .action(async (name: string, options: { dir?: string }) => {
+        .option('--environment <label>', 'Environment this workspace belongs to (from .calm-workspace/config.json)')
+        .action(async (name: string, options: { dir?: string; environment?: string }) => {
             const workspaceName: string = name as string;
             const targetDir = options.dir ? path.resolve(options.dir) : (findGitRoot(process.cwd()) ?? process.cwd());
 
             try {
+                // Validate the label before creating anything, so a typo does not leave a bundle behind.
+                if (options.environment) {
+                    const config = await loadWorkspaceConfig(targetDir);
+                    resolveEnvironment(validateEnvironments(config.environments), options.environment);
+                }
+
                 const created = await ensureWorkspaceBundle(targetDir, workspaceName);
+                if (options.environment) {
+                    await setBundleEnvironment(created, options.environment);
+                    logger.info(`Workspace '${workspaceName}' belongs to environment '${options.environment}'`);
+                }
                 logger.info(`Workspace '${workspaceName}' created/updated at ${path.dirname(created)}`);
                 logger.info(`Bundle directory ensured at ${created}`);
             } catch (err) {
                 logger.error('Failed to create workspace: ' + (err instanceof Error ? err.message : String(err)));
+                process.exit(1);
+            }
+        });
+
+    const environmentCmd = workspaceCmd
+        .command('environment')
+        .description('Show or change the environment the active workspace bundle belongs to')
+        .action(async () => {
+            try {
+                const bundlePath = requireBundlePath();
+                const label = (await loadBundleMetadata(bundlePath))?.environment;
+                if (!label) {
+                    logger.info('This workspace bundle has no environment. Set one with `calm workspace environment set <label>`.');
+                    return;
+                }
+                const environments = validateEnvironments((await loadWorkspaceConfig(requireGitRoot())).environments);
+                logger.info(describeEnvironment(label, resolveEnvironment(environments, label)));
+            } catch (err) {
+                logger.error('Failed to read the workspace environment: ' + (err instanceof Error ? err.message : String(err)));
+                process.exit(1);
+            }
+        });
+
+    environmentCmd
+        .command('list')
+        .description('List the environments declared in .calm-workspace/config.json')
+        .action(async () => {
+            try {
+                const gitRoot = requireGitRoot();
+                const environments = validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+
+                // Map each environment to the bundles that belong to it, so `list` answers
+                // "who is pointing at prod?" without inspecting every bundle by hand.
+                const usage: Record<string, string[]> = {};
+                for (const workspaceName of await listWorkspaces(gitRoot)) {
+                    const label = (await loadBundleMetadata(getWorkspaceBundlePath(gitRoot, workspaceName)))?.environment;
+                    if (label) (usage[label] ??= []).push(workspaceName);
+                }
+
+                logger.info('Declared environments:');
+                for (const [label, environment] of Object.entries(environments)) {
+                    const bundles = usage[label]?.length ? ` - bundles: ${usage[label].join(', ')}` : '';
+                    logger.info(`  ${describeEnvironment(label, environment)}${bundles}`);
+                }
+            } catch (err) {
+                logger.error('Failed to list environments: ' + (err instanceof Error ? err.message : String(err)));
+                process.exit(1);
+            }
+        });
+
+    environmentCmd
+        .command('show')
+        .description('Show one environment\'s url, namespace and domain')
+        .argument('[label]', 'Environment label (defaults to the active bundle\'s environment)')
+        .action(async (label?: string) => {
+            try {
+                const gitRoot = requireGitRoot();
+                const resolvedLabel = label ?? (await loadBundleMetadata(requireBundlePath()))?.environment;
+                if (!resolvedLabel) {
+                    logger.error('No environment given and the active bundle has no environment.');
+                    process.exit(1);
+                    return;
+                }
+                const environments = validateEnvironments((await loadWorkspaceConfig(gitRoot)).environments);
+                logger.info(describeEnvironment(resolvedLabel, resolveEnvironment(environments, resolvedLabel)));
+            } catch (err) {
+                logger.error('Failed to show environment: ' + (err instanceof Error ? err.message : String(err)));
+                process.exit(1);
+            }
+        });
+
+    environmentCmd
+        .command('set')
+        .description('Set the environment the active workspace bundle belongs to')
+        .argument('<label>', 'Environment label from .calm-workspace/config.json')
+        .action(async (label: string) => {
+            try {
+                const bundlePath = requireBundlePath();
+                const environments = validateEnvironments((await loadWorkspaceConfig(requireGitRoot())).environments);
+                const environment = resolveEnvironment(environments, label);
+                await setBundleEnvironment(bundlePath, label);
+                logger.info(`Workspace bundle now belongs to ${describeEnvironment(label, environment)}`);
+            } catch (err) {
+                logger.error('Failed to set environment: ' + (err instanceof Error ? err.message : String(err)));
+                process.exit(1);
+            }
+        });
+
+    environmentCmd
+        .command('unset')
+        .description('Remove the active bundle\'s environment')
+        .action(async () => {
+            try {
+                const bundlePath = requireBundlePath();
+                await setBundleEnvironment(bundlePath, undefined);
+                logger.info('Workspace bundle no longer belongs to an environment.');
+            } catch (err) {
+                logger.error('Failed to unset environment: ' + (err instanceof Error ? err.message : String(err)));
                 process.exit(1);
             }
         });
@@ -549,4 +660,22 @@ async function enforceOptionPresenceByPrompt(cliInput: string | undefined, promp
         message: prompt
     });
 };
+
+/** Resolve the git root or throw — every environment lookup needs it to find config.json. */
+function requireGitRoot(): string {
+    const gitRoot = findGitRoot(process.cwd());
+    if (!gitRoot) {
+        throw new Error('No git repository found. Please run this command from within a git repository.');
+    }
+    return gitRoot;
+}
+
+/** Resolve the active bundle directory or throw. */
+function requireBundlePath(): string {
+    const bundlePath = findWorkspaceManifestPath(process.cwd());
+    if (!bundlePath) {
+        throw new Error('No CALM workspace bundle found. Create one with `calm workspace init <name>`');
+    }
+    return bundlePath;
+}
 
