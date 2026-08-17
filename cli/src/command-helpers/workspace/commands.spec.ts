@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => {
         loggerWarn: vi.fn(),
         loggerError: vi.fn(),
         loggerDebug: vi.fn(),
+        checkEnvironmentConsistency: vi.fn<() => Promise<Array<{ id: string; documentId: string; reason: string }>>>(async () => []),
     };
 });
 
@@ -132,6 +133,8 @@ vi.mock('@finos/calm-shared/src/hub/document-id-utils', () => ({
 }));
 
 vi.mock('./hub-resolution', () => ({ resolveWorkspaceHub: mocks.resolveWorkspaceHub }));
+
+vi.mock('./environment-consistency', () => ({ checkEnvironmentConsistency: mocks.checkEnvironmentConsistency }));
 
 vi.mock('fs/promises', async (importOriginal) => {
     const actual = await importOriginal<typeof import('fs/promises')>();
@@ -742,6 +745,33 @@ describe('setupWorkspaceCommands', () => {
             await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
             expect(mocks.runPostBumpValidation).toHaveBeenCalled();
             expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+    });
+
+    describe('environment consistency', () => {
+        const finding = { id: 'gateway', documentId: 'https://dev/x', reason: 'base URL is https://dev, expected https://prod' };
+
+        it('push warns but still pushes when a document belongs elsewhere', async () => {
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([finding]);
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.pushWorkspaceToHub).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('check fails when a document belongs elsewhere', async () => {
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([finding]);
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('does not check consistency when the bundle has no environment', async () => {
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://from-user-config' },
+                environmentLabel: undefined,
+                environment: undefined,
+            });
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.checkEnvironmentConsistency).not.toHaveBeenCalled();
         });
     });
 

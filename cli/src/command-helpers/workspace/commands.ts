@@ -20,6 +20,7 @@ import { CalmHubClient, ResourceChangeType } from '@finos/calm-shared/src/hub/ca
 import { isConformantDocumentId, namespaceFromDocumentId } from '@finos/calm-shared/src/hub/document-id-utils';
 import { loadCliConfig } from '../../cli-config';
 import { resolveWorkspaceHub } from './hub-resolution';
+import { checkEnvironmentConsistency } from './environment-consistency';
 
 const logger: Logger = initLogger(false, 'workspace');
 
@@ -457,10 +458,16 @@ export function setupWorkspaceCommands(program: Command) {
                 const bundlePath = requireBundlePath();
                 const gitRoot = findGitRoot(process.cwd());
 
-                const { calmHubOptions } = await resolveHubAndAnnounce('Pushing', bundlePath, gitRoot, {
+                const { calmHubOptions, environment } = await resolveHubAndAnnounce('Pushing', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                     expectEnvironment: options.expectEnvironment,
                 });
+
+                if (environment) {
+                    for (const finding of await checkEnvironmentConsistency(bundlePath, environment)) {
+                        logger.warn(`'${finding.id}' does not belong to this environment: ${finding.reason}`);
+                    }
+                }
 
                 const workspaceConfig = gitRoot ? await loadWorkspaceConfig(gitRoot) : undefined;
                 const failIfModified = options.failIfModified ?? workspaceConfig?.push.failIfModified ?? false;
@@ -482,12 +489,24 @@ export function setupWorkspaceCommands(program: Command) {
             try {
                 const bundlePath = requireBundlePath();
                 const gitRoot = findGitRoot(process.cwd());
-                const { calmHubOptions } = await resolveHubAndAnnounce('Checking', bundlePath, gitRoot, {
+                const { calmHubOptions, environment } = await resolveHubAndAnnounce('Checking', bundlePath, gitRoot, {
                     calmHubUrl: options.calmHubUrl,
                     environmentOverride: options.environment,
                 });
                 const client = new CalmHubClient(calmHubOptions);
                 const changed = await detectChangedResources(bundlePath, client);
+
+                let inconsistent = false;
+                if (environment) {
+                    const findings = await checkEnvironmentConsistency(bundlePath, environment);
+                    if (findings.length > 0) {
+                        inconsistent = true;
+                        logger.error(`${findings.length} document(s) do not belong to this environment:`);
+                        for (const finding of findings) {
+                            logger.error(`  ${finding.id}: ${finding.reason}`);
+                        }
+                    }
+                }
 
                 let needsBump = false;
                 if (changed.length === 0) {
@@ -518,7 +537,7 @@ export function setupWorkspaceCommands(program: Command) {
                     }
                 }
 
-                if (needsBump || validationFailed) {
+                if (needsBump || validationFailed || inconsistent) {
                     process.exit(1);
                 }
             } catch (err) {
