@@ -975,6 +975,19 @@ describe('setupWorkspaceCommands', () => {
                 })
             );
         });
+
+        it('add warns and falls back to the CLI config base URL when the bundle has an environment but no git root', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            mocks.findGitRoot.mockReturnValueOnce(null);
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({ baseUrlDefault: 'https://calmhub.example.com' })
+            );
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.not.objectContaining({ namespaceDefault: expect.anything() })
+            );
+            expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('environment \'prod\''));
+        });
     });
 
 });

@@ -705,6 +705,12 @@ async function documentIdDefaults(bundlePath: string): Promise<{
             ...(environment.domain ? { domainDefault: environment.domain } : {}),
         };
     }
+    if (label && !gitRoot) {
+        logger.warn(
+            `This bundle belongs to environment '${label}', but no git repository was found, so its ` +
+            'settings cannot be read. Falling back to the CalmHub URL from ~/.calm.json.'
+        );
+    }
     return { baseUrlDefault: (await loadCliConfig())?.calmHubUrl };
 }
 
