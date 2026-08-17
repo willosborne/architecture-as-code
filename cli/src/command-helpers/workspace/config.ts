@@ -21,6 +21,13 @@ export interface WorkspaceConfig {
     bump: {
         defaultIncrement: ResourceChangeType;
     };
+    /**
+     * Environment declarations, returned exactly as they appear on disk. Deliberately `unknown`:
+     * this loader never throws, and validating here would make a malformed block break commands
+     * that never read it. Validate with `validateEnvironments` from `./environment` at the point
+     * of use.
+     */
+    environments?: unknown;
 }
 
 export const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
@@ -67,6 +74,7 @@ export async function loadWorkspaceConfig(gitRoot: string): Promise<WorkspaceCon
                     ? (defaultIncrement as ResourceChangeType)
                     : DEFAULT_WORKSPACE_CONFIG.bump.defaultIncrement,
             },
+            environments: parsed?.environments,
         };
     } catch {
         return DEFAULT_WORKSPACE_CONFIG;
