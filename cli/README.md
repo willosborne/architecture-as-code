@@ -784,12 +784,13 @@ The `calm workspace` commands give you a local development environment for worki
 Create or update a workspace. Creates the bundle directory and sets it as the active workspace.
 
 ```
-calm workspace init <name> [--dir <path>]
+calm workspace init <name> [--dir <path>] [--environment <label>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--dir <path>` | Directory in which to create the workspace. Defaults to the repository root (detected via git). |
+| `--environment <label>` | Environment this workspace belongs to, from `.calm-workspace/config.json`. See [Environments](#environments). |
 
 ```shell
 calm workspace init my-system
@@ -862,13 +863,15 @@ where `$TYPE` is one of `patterns`, `architectures`, `standards`, `interfaces`.
 Push every document in the workspace manifest to a CalmHub instance. Each document's identity — namespace, type, mapping id and **version** — comes from its `$id` (of the form `$BASE_URL/calm/namespaces/$NAMESPACE/$TYPE/$MAPPING_ID/versions/$VERSION`). Push **does not auto-bump**: it creates exactly the version each document declares. Documents without a well-formed mapping `$id` (or whose type has no CalmHub resource type) are skipped with a warning.
 
 ```
-calm workspace push [--calm-hub-url <url>] [--fail-if-modified]
+calm workspace push [--calm-hub-url <url>] [--fail-if-modified] [--expect-environment <label>]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to `calmHubUrl` in `~/.calm.json`. |
+| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to the bundle's environment, then `calmHubUrl` in `~/.calm.json`. |
 | `--fail-if-modified` | Fail the push if a document that already exists in CalmHub at its declared version has changed on disk. Overrides `push.failIfModified` in the workspace config. |
+| `--expect-environment <label>` | CI guard: fail before any hub traffic unless the active bundle belongs to this environment. See [Environments](#environments). |
+| `--environment <label>` | Not accepted on `push` — it acts on the bundle's own environment. Change it with `calm workspace environment set <label>`. |
 
 For each tracked document, push looks up the existing versions in CalmHub:
 - **Version does not exist** → creates it.
@@ -888,8 +891,13 @@ calm workspace push --fail-if-modified           # strict merge-time mode
 Check whether any tracked document has changed on disk relative to CalmHub but has **not** been version-bumped. Intended as a CI/PR gate — it **exits non-zero** when a bump is required, so a PR cannot merge with unversioned changes.
 
 ```
-calm workspace check [--calm-hub-url <url>]
+calm workspace check [--calm-hub-url <url>] [--environment <label>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to the bundle's environment, then `calmHubUrl` in `~/.calm.json`. |
+| `--environment <label>` | Dry-check the hub round-trip against another environment instead of the bundle's own, without changing the bundle. The consistency check (does each document's `$id` belong where it claims?) always runs against the bundle's own environment regardless of this flag. See [Environments](#environments). |
 
 A document is flagged when its on-disk `$id` version still matches a version in CalmHub but its content differs. Brand-new documents (not yet in CalmHub) and already-bumped documents (whose version is ahead of CalmHub) are not flagged.
 
@@ -1143,7 +1151,8 @@ calm workspace add ./patterns/trading.pattern.json
 calm workspace add ./patterns/gateway.pattern.json
 ```
 
-`add` no longer asks for a base URL — the bundle's environment is `dev`, so the `$id` is built against
+`add` pre-fills the base URL and namespace from the bundle's environment, so you can accept the
+defaults instead of retyping them — the bundle's environment is `dev`, so the `$id` prompt defaults to
 `https://calm-dev.corp`. An existing bundle would run `calm workspace environment set dev` instead of
 re-running `init`.
 
