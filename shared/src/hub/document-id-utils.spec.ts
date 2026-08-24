@@ -11,7 +11,8 @@ import {
     extractControlMetadata,
     updateControlDocumentMetadata,
     isConformantDocumentId,
-    namespaceFromDocumentId
+    namespaceFromDocumentId,
+    parseAnyDocumentId
 } from './document-id-utils';
 
 const DOCUMENT_ID = 'https://example.com/calm/namespaces/finos/architectures/my-arch/versions/1.0.0';
@@ -355,5 +356,47 @@ describe('Document ID Utils', () => {
         it('returns undefined for a non-conformant id', () => {
             expect(namespaceFromDocumentId('my-arch')).toBeUndefined();
         });
+    });
+});
+
+describe('parseAnyDocumentId', () => {
+    it('parses a namespace resource id', () => {
+        expect(parseAnyDocumentId('https://calm.corp/calm/namespaces/trading/patterns/gateway/versions/1.2.3')).toEqual({
+            kind: 'namespace',
+            baseUrl: 'https://calm.corp',
+            namespace: 'trading',
+            type: 'patterns',
+            mapping: 'gateway',
+            version: '1.2.3',
+        });
+    });
+
+    it('parses a control requirement id', () => {
+        expect(parseAnyDocumentId('https://calm.corp/calm/domains/security/controls/encryption/requirement/versions/2.0.0')).toEqual({
+            kind: 'requirement',
+            baseUrl: 'https://calm.corp',
+            domain: 'security',
+            controlName: 'encryption',
+            version: '2.0.0',
+        });
+    });
+
+    it('parses a control configuration id', () => {
+        expect(parseAnyDocumentId('https://calm.corp/calm/domains/security/controls/encryption/configurations/at-rest/versions/2.0.0')).toEqual({
+            kind: 'configuration',
+            baseUrl: 'https://calm.corp',
+            domain: 'security',
+            controlName: 'encryption',
+            configName: 'at-rest',
+            version: '2.0.0',
+        });
+    });
+
+    it('returns null for a non-conformant id', () => {
+        expect(parseAnyDocumentId('adr-0007')).toBeNull();
+    });
+
+    it('returns null for a namespace-shaped id with an invalid resource type', () => {
+        expect(parseAnyDocumentId('https://calm.corp/calm/namespaces/trading/widgets/gateway/versions/1.0.0')).toBeNull();
     });
 });

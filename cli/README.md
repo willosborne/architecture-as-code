@@ -784,12 +784,13 @@ The `calm workspace` commands give you a local development environment for worki
 Create or update a workspace. Creates the bundle directory and sets it as the active workspace.
 
 ```
-calm workspace init <name> [--dir <path>]
+calm workspace init <name> [--dir <path>] [--environment <label>]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--dir <path>` | Directory in which to create the workspace. Defaults to the repository root (detected via git). |
+| `--environment <label>` | Environment this workspace belongs to, from `.calm-workspace/config.json`. See [Environments](#environments). |
 
 ```shell
 calm workspace init my-system
@@ -862,13 +863,15 @@ where `$TYPE` is one of `patterns`, `architectures`, `standards`, `interfaces`.
 Push every document in the workspace manifest to a CalmHub instance. Each document's identity — namespace, type, mapping id and **version** — comes from its `$id` (of the form `$BASE_URL/calm/namespaces/$NAMESPACE/$TYPE/$MAPPING_ID/versions/$VERSION`). Push **does not auto-bump**: it creates exactly the version each document declares. Documents without a well-formed mapping `$id` (or whose type has no CalmHub resource type) are skipped with a warning.
 
 ```
-calm workspace push [--calm-hub-url <url>] [--fail-if-modified]
+calm workspace push [--calm-hub-url <url>] [--fail-if-modified] [--expect-environment <label>]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to `calmHubUrl` in `~/.calm.json`. |
+| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to the bundle's environment, then `calmHubUrl` in `~/.calm.json`. |
 | `--fail-if-modified` | Fail the push if a document that already exists in CalmHub at its declared version has changed on disk. Overrides `push.failIfModified` in the workspace config. |
+| `--expect-environment <label>` | CI guard: fail before any hub traffic unless the active bundle belongs to this environment. See [Environments](#environments). |
+| `--environment <label>` | Not accepted on `push` — it acts on the bundle's own environment. Change it with `calm workspace environment set <label>`. |
 
 For each tracked document, push looks up the existing versions in CalmHub:
 - **Version does not exist** → creates it.
@@ -888,8 +891,13 @@ calm workspace push --fail-if-modified           # strict merge-time mode
 Check whether any tracked document has changed on disk relative to CalmHub but has **not** been version-bumped. Intended as a CI/PR gate — it **exits non-zero** when a bump is required, so a PR cannot merge with unversioned changes.
 
 ```
-calm workspace check [--calm-hub-url <url>]
+calm workspace check [--calm-hub-url <url>] [--environment <label>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--calm-hub-url <url>` | CalmHub base URL. If omitted, falls back to the bundle's environment, then `calmHubUrl` in `~/.calm.json`. |
+| `--environment <label>` | Dry-check the hub round-trip against another environment instead of the bundle's own, without changing the bundle. The consistency check (does each document's `$id` belong where it claims?) always runs against the bundle's own environment regardless of this flag. See [Environments](#environments). |
 
 A document is flagged when its on-disk `$id` version still matches a version in CalmHub but its content differs. Brand-new documents (not yet in CalmHub) and already-bumped documents (whose version is ahead of CalmHub) are not flagged.
 
@@ -1042,6 +1050,132 @@ calm workspace clean
 # Clean everything
 calm workspace clean --all
 ```
+
+### Environments
+
+A workspace bundle can optionally declare which CalmHub **environment** it belongs to — `dev`, `qa`,
+`prod`, or whatever labels your team uses. Once a bundle has one, every hub-touching command resolves
+its target hub from it, `add`/`new` build `$id`s against it, and `push`/`check` warn or fail if a
+tracked document's `$id` doesn't actually belong to it.
+
+**A bundle with no environment behaves exactly as it did before this feature.** Nothing here is
+required — it's an opt-in layer for teams running more than one CalmHub instance (or more than one
+namespace on a shared instance) for the same set of documents.
+
+#### Declaring environments — `.calm-workspace/config.json`
+
+Environments are declared centrally, alongside the existing `push` and `bump` config:
+
+```json
+{
+  "push": { "failIfModified": false },
+  "bump": { "defaultIncrement": "MINOR" },
+  "environments": {
+    "dev":  { "url": "https://calm-dev.corp" },
+    "qa":   { "url": "https://calm-qa.corp",  "namespace": "trading-qa" },
+    "prod": { "url": "https://calm.corp", "namespace": "trading-prod", "domain": "security-prod" }
+  }
+}
+```
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `url` | Yes | The CalmHub base URL for this environment. |
+| `namespace` | No | Override applied to namespace resources (patterns, architectures, standards, interfaces). Omitted means "keep whatever the document has". |
+| `domain` | No | Override applied to control requirements and configurations. Omitted means "keep whatever the document has". |
+
+#### A bundle's environment
+
+A bundle records its environment in `.calm-workspace/bundles/<name>/bundle.json` (`{ "environment": "dev" }`). A bundle without that file has no environment. Set it at creation with `calm workspace init <name> --environment <label>`, or on an existing bundle with `calm workspace environment set <label>`. `calm workspace clean` preserves `bundle.json` — cleaning a bundle's documents doesn't change which environment it belongs to.
+
+#### `calm workspace environment`
+
+```
+calm workspace environment                 The active bundle's environment, and where it points
+calm workspace environment list            Configured environments, and which bundles use each
+calm workspace environment show [label]    One environment's url, namespace and domain
+calm workspace environment set <label>     Set the active bundle's environment
+calm workspace environment unset           Remove it, returning the bundle to today's behaviour
+```
+
+```shell
+calm workspace environment list
+# Declared environments:
+#   dev (https://calm-dev.corp) - bundles: trading
+#   prod (https://calm.corp)
+
+calm workspace environment
+# dev (https://calm-dev.corp)
+
+calm workspace environment set prod
+# Workspace bundle now belongs to prod (https://calm.corp)
+
+calm workspace environment unset
+# Workspace bundle no longer belongs to an environment.
+```
+
+#### How environments affect the rest of the suite
+
+- **Hub resolution** for `push`, `check` and `bump`: explicit `--calm-hub-url` wins, then the active bundle's environment URL, then `~/.calm.json` / `CALM_HUB_URL`. A `--calm-hub-url` that disagrees with the bundle's environment is an error rather than a silent wrong-hub push.
+- **`add` and `new`** take their `$id` base URL and namespace/domain defaults from the bundle's environment when it has one (still overridable at the prompt), falling back to `~/.calm.json` otherwise.
+- **Consistency.** When a bundle has an environment, `push` warns and `check` fails if any tracked document's `$id` belongs to a different base URL, namespace or domain than the environment declares. Non-CalmHub `$id`s (flow, adr, timeline) are exempt.
+- **`push --expect-environment <label>`** fails before any hub traffic unless the active bundle belongs to that environment — a CI guard against a renamed or re-pointed bundle.
+- **`check --environment <label>`** dry-checks against another environment without changing the bundle. `push` and `bump` reject `--environment` (they act on the bundle's own environment; change it with `environment set`).
+- **`list`, `show` and `switch`** annotate their output with the bundle's environment, e.g. `* trading (dev)`, `Environment: dev (https://calm-dev.corp)`, `Switched to workspace 'trading' (dev).`
+
+Every hub-touching command also prints its target before acting, e.g. `Pushing bundle 'trading' (dev -> https://calm-dev.corp)`, so a wrong environment is visible at the moment it matters.
+
+#### Walkthrough — a CalmHub per environment
+
+An architect iterates on a pattern locally against a dev hub, with a separate prod hub they don't push
+to directly.
+
+**One-time, committed to the repo:**
+
+```jsonc
+// .calm-workspace/config.json
+{
+  "push": { "failIfModified": false },
+  "bump": { "defaultIncrement": "MINOR" },
+  "environments": {
+    "dev":  { "url": "https://calm-dev.corp" },
+    "prod": { "url": "https://calm.corp" }
+  }
+}
+```
+
+```shell
+calm workspace environment list                 # confirm what's configured
+calm workspace init trading --environment dev    # bundles/trading/bundle.json = { "environment": "dev" }
+calm workspace add ./patterns/trading.pattern.json
+calm workspace add ./patterns/gateway.pattern.json
+```
+
+`add` pre-fills the base URL and namespace from the bundle's environment, so you can accept the
+defaults instead of retyping them — the bundle's environment is `dev`, so the `$id` prompt defaults to
+`https://calm-dev.corp`. An existing bundle would run `calm workspace environment set dev` instead of
+re-running `init`.
+
+**The inner loop.** No `--calm-hub-url` anywhere: the bundle's environment is `dev`, so every command
+resolves to the dev hub on its own.
+
+```shell
+$EDITOR patterns/trading.pattern.json
+
+calm workspace check      # what changed against dev?
+calm workspace bump       # re-derive versions against dev, rewrite $ids and $refs
+calm workspace push       # publish to https://calm-dev.corp
+```
+
+If they fat-finger `calm workspace push --calm-hub-url https://calm.corp`, it now errors — the bundle
+says `dev` and the flag says otherwise:
+
+```
+--calm-hub-url https://calm.corp conflicts with environment 'dev' (https://calm-dev.corp). Drop the
+flag, or change the bundle's environment with `calm workspace environment set <label>`.
+```
+
+Without environments, that command would silently publish dev-pointing documents into prod.
 
 ### Example workflow
 

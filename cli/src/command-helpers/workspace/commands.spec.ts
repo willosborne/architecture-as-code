@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
         setActiveWorkspace: vi.fn(async () => { }),
         cleanWorkspaceBundle: vi.fn(async () => { }),
         cleanAllWorkspaces: vi.fn(async () => { }),
+        getWorkspaceBundlePath: vi.fn((gitRoot: string, workspaceName: string) => `${gitRoot}/.calm-workspace/bundles/${workspaceName}`),
         addFileToBundle: vi.fn(async () => ({ id: 'test-doc', destPath: '/fake/bundle/files/test.json', rel: 'files/test.json' })),
         printBundleTree: vi.fn(async () => { }),
         createNewDocument: vi.fn(async () => '/fake/repo/com.example-architecture-my-arch.json'),
@@ -18,9 +19,18 @@ const mocks = vi.hoisted(() => {
         detectChangedResources: vi.fn(async () => []),
         bumpWorkspace: vi.fn(async () => ({ bumped: [], refUpdates: [] })),
         runPostBumpValidation: vi.fn(async () => []),
-        loadWorkspaceConfig: vi.fn(async () => ({ push: { failIfModified: false }, bump: { defaultIncrement: 'MINOR' } })),
+        loadWorkspaceConfig: vi.fn(async () => ({
+            push: { failIfModified: false },
+            bump: { defaultIncrement: 'MINOR' },
+            environments: {
+                dev: { url: 'https://calm-dev.corp' },
+                prod: { url: 'https://calm.corp', namespace: 'trading-prod' },
+            },
+        })),
         findWorkspaceManifestPath: vi.fn<() => string | null>(() => '/fake/bundle'),
         findGitRoot: vi.fn<() => string | null>(() => '/fake/repo'),
+        loadBundleMetadata: vi.fn<() => Promise<{ environment?: string } | undefined>>(async () => ({ environment: 'dev' })),
+        setBundleEnvironment: vi.fn(async () => { }),
         loadManifest: vi.fn(async () => ({})),
         removeDocumentFromManifest: vi.fn(async () => true),
         loadCliConfig: vi.fn(async () => ({ calmHubUrl: 'https://calmhub.example.com' })),
@@ -39,6 +49,19 @@ const mocks = vi.hoisted(() => {
         })),
         isConformantDocumentId: vi.fn(() => true),
         namespaceFromDocumentId: vi.fn(() => 'ns'),
+        resolveWorkspaceHub: vi.fn(async () => ({
+            calmHubOptions: { calmHubUrl: 'https://calm-dev.corp' },
+            environmentLabel: 'dev',
+            environment: { url: 'https://calm-dev.corp' },
+            bundleEnvironmentLabel: 'dev',
+            bundleEnvironment: { url: 'https://calm-dev.corp' },
+        })),
+        loggerInfo: vi.fn(),
+        loggerWarn: vi.fn(),
+        loggerError: vi.fn(),
+        loggerDebug: vi.fn(),
+        checkEnvironmentConsistency: vi.fn<() => Promise<Array<{ id: string; documentId: string; reason: string }>>>(async () => []),
+        describeInconsistency: vi.fn<(documentId: string, environment: unknown) => string | null>(() => null),
     };
 });
 
@@ -49,6 +72,7 @@ vi.mock('./workspace', () => ({
     setActiveWorkspace: mocks.setActiveWorkspace,
     cleanWorkspaceBundle: mocks.cleanWorkspaceBundle,
     cleanAllWorkspaces: mocks.cleanAllWorkspaces,
+    getWorkspaceBundlePath: mocks.getWorkspaceBundlePath,
 }));
 
 vi.mock('./bundle', () => ({
@@ -83,6 +107,11 @@ vi.mock('./config', () => ({
     loadWorkspaceConfig: mocks.loadWorkspaceConfig,
 }));
 
+vi.mock('./bundle-metadata', () => ({
+    loadBundleMetadata: mocks.loadBundleMetadata,
+    setBundleEnvironment: mocks.setBundleEnvironment,
+}));
+
 vi.mock('../../workspace-resolver', () => ({
     findWorkspaceManifestPath: mocks.findWorkspaceManifestPath,
     findGitRoot: mocks.findGitRoot,
@@ -106,6 +135,13 @@ vi.mock('@finos/calm-shared/src/hub/document-id-utils', () => ({
     namespaceFromDocumentId: mocks.namespaceFromDocumentId,
 }));
 
+vi.mock('./hub-resolution', () => ({ resolveWorkspaceHub: mocks.resolveWorkspaceHub }));
+
+vi.mock('./environment-consistency', () => ({
+    checkEnvironmentConsistency: mocks.checkEnvironmentConsistency,
+    describeInconsistency: mocks.describeInconsistency,
+}));
+
 vi.mock('fs/promises', async (importOriginal) => {
     const actual = await importOriginal<typeof import('fs/promises')>();
     return { ...actual, readFile: mocks.readFile, writeFile: mocks.writeFile };
@@ -118,10 +154,10 @@ vi.mock('@inquirer/prompts', () => ({
 
 vi.mock('@finos/calm-shared/src/logger', () => ({
     initLogger: () => ({
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
+        info: mocks.loggerInfo,
+        warn: mocks.loggerWarn,
+        error: mocks.loggerError,
+        debug: mocks.loggerDebug,
     }),
 }));
 
@@ -165,6 +201,105 @@ describe('setupWorkspaceCommands', () => {
         });
     });
 
+    describe('workspace init --environment', () => {
+        it('sets the bundle environment when the label is declared', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws', '--environment', 'prod']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', 'prod');
+        });
+
+        it('does not touch bundle.json when no environment is given', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws']);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('exits when the label is not declared', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'init', 'my-ws', '--environment', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('workspace environment', () => {
+        it('set records the environment on the active bundle', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'prod']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', 'prod');
+        });
+
+        it('set exits for an undeclared label', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('set exits when no workspace bundle found', async () => {
+            mocks.findWorkspaceManifestPath.mockReturnValueOnce(null);
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'set', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.setBundleEnvironment).not.toHaveBeenCalled();
+        });
+
+        it('unset clears the environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'unset']);
+            expect(mocks.setBundleEnvironment).toHaveBeenCalledWith('/fake/bundle', undefined);
+        });
+
+        it('list reads the declared environments from config', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'list']);
+            expect(mocks.loadWorkspaceConfig).toHaveBeenCalledWith('/fake/repo');
+        });
+
+        it('list exits when no git root found', async () => {
+            mocks.findGitRoot.mockReturnValueOnce(null);
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'list'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('list does not attribute a bundle with no environment to any label', async () => {
+            // listWorkspaces (default mock) returns ['default', 'other']; 'default' has no
+            // environment and must not show up in any environment's bundle list, while 'other'
+            // (which does) must show up under the label it actually reports.
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined).mockResolvedValueOnce({ environment: 'dev' });
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'list']);
+
+            const loggedLines = mocks.loggerInfo.mock.calls.map((call) => call[0] as string);
+            const bundleLine = loggedLines.find((line) => line.includes('bundles:'));
+            expect(bundleLine).toContain('other');
+            expect(bundleLine).not.toContain('default');
+            expect(loggedLines.some((line) => line.includes('default'))).toBe(false);
+        });
+
+        it('show resolves a named environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment', 'show', 'prod']);
+            expect(mocks.loadWorkspaceConfig).toHaveBeenCalledWith('/fake/repo');
+        });
+
+        it('show exits for an undeclared label', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'environment', 'show', 'nope'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('with no subcommand reports the active bundle environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'environment']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledWith('/fake/bundle');
+        });
+
+        it('with no subcommand does not fail when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'environment']);
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+    });
+
     const CONFORMANT_ID = 'https://calmhub.example.com/calm/namespaces/ns/architectures/my-arch/versions/1.0.0';
 
     describe('workspace add', () => {
@@ -200,6 +335,32 @@ describe('setupWorkspaceCommands', () => {
             expect(mocks.writeFile).not.toHaveBeenCalled();
             expect(exitSpy).not.toHaveBeenCalled();
             expect(mocks.addFileToBundle).toHaveBeenCalled();
+        });
+
+        it('warns when an existing $id belongs to another environment, but still adds the file', async () => {
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            mocks.describeInconsistency.mockReturnValueOnce('base URL is https://calmhub.example.com, expected https://calm-dev.corp');
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.describeInconsistency).toHaveBeenCalledWith(CONFORMANT_ID, { url: 'https://calm-dev.corp' });
+            expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining(
+                `Document $id '${CONFORMANT_ID}' does not belong to this environment: base URL is https://calmhub.example.com, expected https://calm-dev.corp`
+            ));
+            expect(exitSpy).not.toHaveBeenCalled();
+            expect(mocks.addFileToBundle).toHaveBeenCalled();
+        });
+
+        it('does not warn about environment mismatch when the $id is consistent', async () => {
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.loggerWarn).not.toHaveBeenCalledWith(expect.stringContaining('does not belong to this environment'));
+        });
+
+        it('does not check environment consistency when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            mocks.readFile.mockResolvedValueOnce(JSON.stringify({ $id: CONFORMANT_ID, title: 'My Architecture' }));
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.describeInconsistency).not.toHaveBeenCalled();
+            expect(mocks.loggerWarn).not.toHaveBeenCalledWith(expect.stringContaining('does not belong to this environment'));
         });
 
         it('should prompt for a manifest name when the file has no title field', async () => {
@@ -461,8 +622,10 @@ describe('setupWorkspaceCommands', () => {
     describe('workspace push', () => {
         it('calls pushWorkspaceToHub with a CalmHubClient instance', async () => {
             await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            // calmHubOptions is whatever resolveWorkspaceHub resolves (mocked); see
+            // hub-resolution.spec.ts for the actual --calm-hub-url / environment precedence logic.
             expect(mocks.CalmHubClient).toHaveBeenCalledWith({
-                calmHubUrl: 'https://calmhub.example.com',
+                calmHubUrl: 'https://calm-dev.corp',
             });
             expect(mocks.pushWorkspaceToHub).toHaveBeenCalledWith(
                 '/fake/bundle',
@@ -500,20 +663,24 @@ describe('setupWorkspaceCommands', () => {
             );
         });
 
-        it('uses --calm-hub-url over the value from config', async () => {
+        it('passes --calm-hub-url through to resolveWorkspaceHub', async () => {
+            // The actual --calm-hub-url-over-config precedence is resolveWorkspaceHub's job
+            // (see hub-resolution.spec.ts); here we only prove push forwards the flag.
             await program.parseAsync(['node', 'test', 'workspace', 'push', '--calm-hub-url', 'https://override.example.com']);
-            expect(mocks.CalmHubClient).toHaveBeenCalledWith({
-                calmHubUrl: 'https://override.example.com',
-            });
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ calmHubUrl: 'https://override.example.com' })
+            );
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             await program.parseAsync(['node', 'test', 'workspace', 'push']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -523,8 +690,8 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
 
-        it('exits when no CalmHub URL is configured', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({} as never);
+        it('exits when hub resolution fails because no CalmHub URL is configured', async () => {
+            mocks.resolveWorkspaceHub.mockRejectedValueOnce(new Error('No CalmHub URL configured'));
             await expect(program.parseAsync(['node', 'test', 'workspace', 'push'])).rejects.toThrow();
             expect(exitSpy).toHaveBeenCalledWith(1);
         });
@@ -544,14 +711,16 @@ describe('setupWorkspaceCommands', () => {
             expect(exitSpy).not.toHaveBeenCalled();
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             mocks.detectChangedResources.mockResolvedValueOnce([]);
             await program.parseAsync(['node', 'test', 'workspace', 'check']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -611,6 +780,33 @@ describe('setupWorkspaceCommands', () => {
         });
     });
 
+    describe('environment consistency', () => {
+        const finding = { id: 'gateway', documentId: 'https://dev/x', reason: 'base URL is https://dev, expected https://prod' };
+
+        it('push warns but still pushes when a document belongs elsewhere', async () => {
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([finding]);
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.pushWorkspaceToHub).toHaveBeenCalled();
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('check fails when a document belongs elsewhere', async () => {
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([finding]);
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'check'])).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+        });
+
+        it('does not check consistency when the bundle has no environment', async () => {
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://from-user-config' },
+                environmentLabel: undefined,
+                environment: undefined,
+            });
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.checkEnvironmentConsistency).not.toHaveBeenCalled();
+        });
+    });
+
     describe('workspace bump', () => {
         // Minimal ChangedResource for tests that need detectChangedResources to return something.
         const fakeChanged = [{ id: 'test-doc', currentVersion: '1.0.0', latestHubVersion: '1.0.0', filePath: '/fake/path.json', metadata: {} }];
@@ -626,14 +822,16 @@ describe('setupWorkspaceCommands', () => {
             );
         });
 
-        it('loads the configured auth plugin and passes it to the CalmHubClient', async () => {
-            mocks.loadCliConfig.mockResolvedValueOnce({ calmHubUrl: 'https://calmhub.example.com', authPluginPath: '/plugins/auth.js' } as never);
+        it('passes the calmHubOptions resolveWorkspaceHub resolves straight through to the CalmHubClient, auth plugin included', async () => {
+            const authPlugin = { getAuthHeaders: vi.fn(async () => ({})) };
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calmhub.example.com', authPlugin },
+            });
             mocks.detectChangedResources.mockResolvedValueOnce([]);
             await program.parseAsync(['node', 'test', 'workspace', 'bump']);
-            expect(mocks.loadAuthPlugin).toHaveBeenCalledWith('/plugins/auth.js', false);
             expect(mocks.CalmHubClient).toHaveBeenCalledWith(expect.objectContaining({
                 calmHubUrl: 'https://calmhub.example.com',
-                authPlugin: expect.objectContaining({ getAuthHeaders: expect.any(Function) }),
+                authPlugin,
             }));
         });
 
@@ -752,6 +950,166 @@ describe('setupWorkspaceCommands', () => {
             expect(mocks.bumpWorkspace).toHaveBeenCalled();
             const callOptions = (mocks.bumpWorkspace.mock.calls[0] as unknown[])[2] as { getCascadeIncrement?: unknown };
             expect(callOptions.getCascadeIncrement).toBeUndefined();
+        });
+    });
+
+    describe('environment-aware hub resolution', () => {
+        it('push resolves its hub through resolveWorkspaceHub', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'push']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ bundlePath: '/fake/bundle', gitRoot: '/fake/repo' })
+            );
+        });
+
+        it('push passes --expect-environment through', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'push', '--expect-environment', 'prod']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ expectEnvironment: 'prod' })
+            );
+        });
+
+        it('push exits when hub resolution fails', async () => {
+            mocks.resolveWorkspaceHub.mockRejectedValueOnce(new Error('conflicts with environment'));
+            await expect(program.parseAsync(['node', 'test', 'workspace', 'push'])).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.pushWorkspaceToHub).not.toHaveBeenCalled();
+        });
+
+        it('push rejects --environment with a pointer to the right command', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'push', '--environment', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.pushWorkspaceToHub).not.toHaveBeenCalled();
+            expect(mocks.loggerError).toHaveBeenCalledWith(expect.stringContaining(
+                '`calm workspace push` does not accept --environment: it acts on the bundle\'s own environment. ' +
+                'Change it with `calm workspace environment set <label>`.'
+            ));
+            expect(mocks.loggerError).not.toHaveBeenCalledWith(expect.stringContaining('migrate'));
+        });
+
+        it('check passes --environment through as an override', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'check', '--environment', 'prod']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalledWith(
+                expect.objectContaining({ environmentOverride: 'prod' })
+            );
+        });
+
+        it('check --environment checks consistency against the bundle\'s own environment, not the override, and does not exit 1 when consistent', async () => {
+            mocks.resolveWorkspaceHub.mockResolvedValueOnce({
+                calmHubOptions: { calmHubUrl: 'https://calm.corp' },
+                environmentLabel: 'prod',
+                environment: { url: 'https://calm.corp', namespace: 'trading-prod' },
+                bundleEnvironmentLabel: 'dev',
+                bundleEnvironment: { url: 'https://calm-dev.corp' },
+            });
+            mocks.checkEnvironmentConsistency.mockResolvedValueOnce([]);
+            mocks.detectChangedResources.mockResolvedValueOnce([]);
+            await program.parseAsync(['node', 'test', 'workspace', 'check', '--environment', 'prod']);
+            expect(mocks.checkEnvironmentConsistency).toHaveBeenCalledWith('/fake/bundle', { url: 'https://calm-dev.corp' });
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('bump resolves its hub through resolveWorkspaceHub', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'bump']);
+            expect(mocks.resolveWorkspaceHub).toHaveBeenCalled();
+        });
+
+        it('bump rejects --environment with a pointer to the right command', async () => {
+            await expect(
+                program.parseAsync(['node', 'test', 'workspace', 'bump', '--environment', 'prod'])
+            ).rejects.toThrow();
+            expect(exitSpy).toHaveBeenCalledWith(1);
+            expect(mocks.loggerError).toHaveBeenCalledWith(expect.stringContaining(
+                '`calm workspace bump` does not accept --environment: it acts on the bundle\'s own environment. ' +
+                'Change it with `calm workspace environment set <label>`.'
+            ));
+            expect(mocks.loggerError).not.toHaveBeenCalledWith(expect.stringContaining('migrate'));
+            expect(mocks.bumpWorkspace).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('environment-aware $id defaults', () => {
+        it('add defaults the base URL and namespace from the bundle environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    baseUrlDefault: 'https://calm.corp',
+                    namespaceDefault: 'trading-prod',
+                })
+            );
+        });
+
+        it('add falls back to the CLI config base URL when the bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({ baseUrlDefault: 'https://calmhub.example.com' })
+            );
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.not.objectContaining({ namespaceDefault: expect.anything() })
+            );
+        });
+
+        it('new defaults the base URL and namespace from the bundle environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            await program.parseAsync(['node', 'test', 'workspace', 'new', 'architecture', 'My Arch', 'empty']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    baseUrlDefault: 'https://calm.corp',
+                    namespaceDefault: 'trading-prod',
+                })
+            );
+        });
+
+        it('add warns and falls back to the CLI config base URL when the bundle has an environment but no git root', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce({ environment: 'prod' });
+            mocks.findGitRoot.mockReturnValueOnce(null);
+            await program.parseAsync(['node', 'test', 'workspace', 'add', 'test.json']);
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.objectContaining({ baseUrlDefault: 'https://calmhub.example.com' })
+            );
+            expect(mocks.promptForDocumentId).toHaveBeenCalledWith(
+                expect.not.objectContaining({ namespaceDefault: expect.anything() })
+            );
+            expect(mocks.loggerWarn).toHaveBeenCalledWith(expect.stringContaining('environment \'prod\''));
+        });
+    });
+
+    describe('environment annotations', () => {
+        it('list reads each bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'list']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledTimes(2); // 'default' and 'other'
+        });
+
+        it('list still works when a bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'list']);
+            expect(exitSpy).not.toHaveBeenCalled();
+        });
+
+        it('show reads the active bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'show']);
+            expect(mocks.loadBundleMetadata).toHaveBeenCalledWith('/fake/bundle');
+        });
+
+        it('show reports no environment when the active bundle has none', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'show']);
+            expect(mocks.loggerInfo).toHaveBeenCalledWith('Environment: none');
+        });
+
+        it('switch reads the target bundle\'s environment', async () => {
+            await program.parseAsync(['node', 'test', 'workspace', 'switch', 'other']);
+            expect(mocks.setActiveWorkspace).toHaveBeenCalledWith('/fake/repo', 'other');
+            expect(mocks.loadBundleMetadata).toHaveBeenCalled();
+        });
+
+        it('switch announces without a suffix when the target bundle has no environment', async () => {
+            mocks.loadBundleMetadata.mockResolvedValueOnce(undefined);
+            await program.parseAsync(['node', 'test', 'workspace', 'switch', 'other']);
+            expect(mocks.loggerInfo).toHaveBeenCalledWith('Switched to workspace \'other\'.');
         });
     });
 

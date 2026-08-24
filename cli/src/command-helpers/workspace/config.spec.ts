@@ -57,4 +57,19 @@ describe('workspace config', () => {
         expect(config.push.failIfModified).toBe(false);
         expect(config.bump.defaultIncrement).toBe('MINOR');
     });
+
+    it('passes the environments block through untouched', async () => {
+        await writeConfig(JSON.stringify({
+            environments: { dev: { url: 'https://calm-dev.corp' } },
+        }));
+        const config = await loadWorkspaceConfig(gitRoot);
+        expect(config.environments).toEqual({ dev: { url: 'https://calm-dev.corp' } });
+    });
+
+    it('does not throw on a malformed environments block', async () => {
+        await writeConfig(JSON.stringify({ environments: 'nonsense' }));
+        const config = await loadWorkspaceConfig(gitRoot);
+        expect(config.environments).toBe('nonsense');
+        expect(config.push.failIfModified).toBe(false);
+    });
 });

@@ -92,6 +92,63 @@ export function namespaceFromDocumentId(id: string): string | undefined {
     }
 }
 
+/**
+ * A conformant CalmHub `$id`, decomposed. Discriminated on `kind` so callers can branch between
+ * namespace-scoped resources and domain-scoped control documents without re-matching the id.
+ */
+export type ParsedDocumentId =
+    | { kind: 'namespace'; baseUrl: string; namespace: string; type: ResourceType; mapping: string; version: string }
+    | { kind: 'requirement'; baseUrl: string; domain: string; controlName: string; version: string }
+    | { kind: 'configuration'; baseUrl: string; domain: string; controlName: string; configName: string; version: string };
+
+/**
+ * Parse any conformant CalmHub `$id` — namespace resource, control requirement or control
+ * configuration — without needing the surrounding document.
+ *
+ * Returns null rather than throwing for ids that are not CalmHub-addressable (flows, ADRs,
+ * timelines, external URLs), because callers treat those as "not our concern" rather than an error.
+ */
+export function parseAnyDocumentId(documentId: string): ParsedDocumentId | null {
+    try {
+        const m = parseDocumentId(documentId);
+        if (m.namespace) {
+            return {
+                kind: 'namespace',
+                baseUrl: m.baseUrl,
+                namespace: m.namespace,
+                type: m.type,
+                mapping: m.mapping,
+                version: m.version,
+            };
+        }
+    } catch {
+        // not a namespace-resource id - fall through to the control forms
+    }
+
+    try {
+        const c = parseControlDocumentId(documentId);
+        if (c.kind === 'configuration') {
+            return {
+                kind: 'configuration',
+                baseUrl: c.baseUrl,
+                domain: c.domain,
+                controlName: c.controlName,
+                configName: c.configName ?? '',
+                version: c.version,
+            };
+        }
+        return {
+            kind: 'requirement',
+            baseUrl: c.baseUrl,
+            domain: c.domain,
+            controlName: c.controlName,
+            version: c.version,
+        };
+    } catch {
+        return null;
+    }
+}
+
 export function constructDocumentId(metadata: DocumentMetadata): string {
     if (!metadata.namespace || !metadata.mapping) {
         throw new Error('Invalid document $id format. Document ID must be of the form $BASE_URL/calm/namespaces/$NAMESPACE/$TYPE/$MAPPING_ID/versions/$VERSION');
